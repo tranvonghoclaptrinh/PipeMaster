@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pipe Master Pro - Giftcode Update</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        const SAVE_KEY = "pipe_master_save";
+// ===== AUDIO SYSTEM =====
+        const AUDIO = {
+            rotate: new Audio("audio/xoayong.mp3"),
+            break: new Audio("audio/break.mp3"),
+            complete: new Audio("audio/complete.mp3"),
+            hint: new Audio("audio/hint.mp3"),
+            click: new Audio("audio/click.mp3"),
+            win: new Audio("audio/win.mp3"),
+            breakrock: new Audio("audio/breakrock.mp3"),
+            error: new Audio("audio/error.mp3"),
+            background: new Audio("audio/background.mp3"),
+            gameplay: new Audio("audio/gameplay.mp3")
+        };
+
+        function playSound(name, volume = 1) {
+            const a = AUDIO[name];
+            if (!a) return;
+            a.pause();
+            a.currentTime = 0;
+            a.volume = volume;
+            a.play().catch(()=>{});
+        }
+
+        // hint đặc biệt → hint xong mới break
+        function playHintBreak() {
+            const hint = AUDIO.hint;
+            const br = AUDIO.break;
+
+            hint.pause();
+            hint.currentTime = 0;
+            hint.volume = 1;
+            hint.play().catch(()=>{});
+
+            hint.onended = () => {
+                br.pause();
+                br.currentTime = 0;
+                br.volume = 1;
+                br.play().catch(()=>{});
+            };
+        }
+        function playCompleteThenWin() {
+
+            const complete = AUDIO.complete;
+            const win = AUDIO.win;
+
+            // reset complete
+            complete.pause();
+            complete.currentTime = 0;
+            complete.volume = 1;
+
+            // khi complete kết thúc → phát win
+            complete.onended = () => {
+                win.pause();
+                win.currentTime = 0;
+                win.volume = 1;
+                win.play().catch(()=>{});
+            };
+
+            complete.play().catch(()=>{});
+        }
+        function playBackground() {
+            const bg = AUDIO.background;
+            bg.loop = true;
+            bg.volume = 0.5;
+            bg.play().catch(()=>{});
+        }
+
+        function stopBackground() {
+            const bg = AUDIO.background;
+            bg.pause();
+            bg.currentTime = 0;
+        }
+
+        function playGameplay() {
+            const gm = AUDIO.gameplay;
+            gm.loop = true;
+            gm.volume = 0.6;
+            gm.play().catch(()=>{});
+        }
+
+        function stopGameplay() {
+            const gm = AUDIO.gameplay;
+            gm.pause();
+            gm.currentTime = 0;
+        }
+
+        const GRID_SIZE = 15; 
+        const WIN_BONUS = 800; 
+        const COIN_VALUE = 50;
+        const SHOVEL_PRICE = 100;
+        const REQUIRED_COINS_COUNT = 30; 
+        const PIPE_TYPES = ['STRAIGHT', 'ELBOW', 'TEE', 'CROSS'];
+        const PIPE_CONNS = {
+            SOURCE: [0, 1, 0, 0], 
+            SINK: [0, 0, 0, 1], 
+            STRAIGHT: [0, 1, 0, 1], 
+            ELBOW: [0, 1, 1, 0], 
+            TEE: [0, 1, 1, 1], 
+            CROSS: [1, 1, 1, 1],
+            DIRT: [0, 0, 0, 0]
+        };
+
+        const GIFT_CODES = {
+            'PIPEMASTER': { coins: 2000, msg: "Quà tặng Pipe Master! Nhận 2000 xu." },
+            'FREE800': { coins: 800, msg: "Nhận 800 xu miễn phí!" },
+            'NEWGAME': { coins: 500, msg: "Chào mừng người chơi mới! Nhận 500 xu." }
+        };
+
+        const App = () => {
+            const [playerName, setPlayerName] = useState("");
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [totalCoins, setTotalCoins] = useState(12840);
+            const [shovelCount, setShovelCount] = useState(0);
+            const [sessionCoins, setSessionCoins] = useState(0); 
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [isShopOpen, setIsShopOpen] = useState(false);
+            const [isMenuOpen, setIsMenuOpen] = useState(false);
+            const [gameGrid, setGameGrid] = useState([]);
+            const [isWon, setIsWon] = useState(false);
+            const [isLost, setIsLost] = useState(false);
+            const [isTutorial, setIsTutorial] = useState(false);
+            const [showTutorialModal, setShowTutorialModal] = useState(false);
+            const [toast, setToast] = useState(null);
+            const [highlightedCells, setHighlightedCells] = useState([]);
+            const [buyQuantity, setBuyQuantity] = useState(1);
+            const [giftCodeInput, setGiftCodeInput] = useState("");
+            const [usedCodes, setUsedCodes] = useState([]);
+
+            useEffect(() => {
+
+                // giữ class body như bạn đang dùng
+                document.body.classList.toggle('game-active', isPlaying);
+
+                // chưa login → không phát gì
+                if (!isLoggedIn) return;
+
+                if (isPlaying) {
+
+                    // tắt background
+                    AUDIO.background.pause();
+                    AUDIO.background.currentTime = 0;
+
+                    // bật gameplay
+                    AUDIO.gameplay.loop = true;
+                    AUDIO.gameplay.volume = 0.6;
+
+                    AUDIO.gameplay.play().catch(()=>{});
+
+                } else {
+
+                    // tắt gameplay
+                    AUDIO.gameplay.pause();
+                    AUDIO.gameplay.currentTime = 0;
+
+                    // bật background
+                    AUDIO.background.loop = true;
+                    AUDIO.background.volume = 0.5;
+
+                    AUDIO.background.play().catch(()=>{});
+
+                }
+
+            }, [isPlaying, isLoggedIn]);
+
+            const showToast = (message, type = 'info') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 3000);
+            };
+
+            const handleLogin = (e) => {
+
+                e.preventDefault();
+
+                playSound("click", 0.5);
+
+                if (playerName.trim().length >= 2) {
+
+                    setIsLoggedIn(true);
+
+                    AUDIO.background.loop = true;
+                    AUDIO.background.volume = 0.5;
+
+                    AUDIO.background.play().catch(()=>{});
+                }
+            };
+
+            const handleRedeemGiftcode = () => {
+                const code = giftCodeInput.trim().toUpperCase();
+                if (!code) return;
+
+                if (usedCodes.includes(code)) {
+                    showToast("Mã này đã được sử dụng!", "error");
+                    return;
+                }
+
+                if (GIFT_CODES[code]) {
+                    const gift = GIFT_CODES[code];
+                    setTotalCoins(prev => prev + gift.coins);
+                    setUsedCodes(prev => [...prev, code]);
+                    setGiftCodeInput("");
+                    showToast(gift.msg, "success");
+                } else {
+                    showToast("Mã Giftcode không hợp lệ!", "error");
+                }
+            };
+
+            const getRandomPipe = () => PIPE_TYPES[Math.floor(Math.random() * PIPE_TYPES.length)];
+
+            const findPathAStar = (grid, ignoreDirt = false) => {
+                const start = { r: 0, c: 0 };
+                const goal = { r: GRID_SIZE - 1, c: GRID_SIZE - 1 };
+                const h = (pos) => Math.abs(pos.r - goal.r) + Math.abs(pos.c - goal.c);
+                const openSet = [{ ...start, g: 0, f: h(start), path: [start] }];
+                const closedSet = new Set();
+
+                while (openSet.length > 0) {
+                    openSet.sort((a, b) => a.f - b.f);
+                    const current = openSet.shift();
+                    const key = `${current.r},${current.c}`;
+                    if (current.r === goal.r && current.c === goal.c) return current.path;
+                    closedSet.add(key);
+                    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                    for (let [dr, dc] of dirs) {
+                        const nr = current.r + dr, nc = current.c + dc;
+                        if (nr < 0 || nr >= GRID_SIZE || nc < 0 || nc >= GRID_SIZE) continue;
+                        if (closedSet.has(`${nr},${nc}`)) continue;
+                        if (!ignoreDirt && grid[nr][nc].type === 'DIRT') continue;
+                        const weight = grid[nr][nc].type === 'DIRT' ? 10 : 1;
+                        const tentativeG = current.g + weight;
+                        const existing = openSet.find(o => o.r === nr && o.c === nc);
+                        if (!existing || tentativeG < existing.g) {
+                            const node = { r: nr, c: nc, g: tentativeG, f: tentativeG + h({r:nr, c:nc}), path: [...current.path, {r:nr, c:nc}] };
+                            if (!existing) openSet.push(node);
+                            else Object.assign(existing, node);
+                        }
+                    }
+                }
+                return null;
+            };
+
+            const checkLoseCondition = (grid, coins, shovels) => {
+                if (shovels > 0 || coins >= SHOVEL_PRICE) return;
+                let coinAvailable = false;
+                grid.forEach(row => row.forEach(cell => {
+                    if (cell.hasCoin) coinAvailable = true;
+                }));
+                if (coinAvailable) return;
+                setIsLost(true);
+            };
+
+            const triggerHighlight = (cells) => {
+                const coords = cells.map(c => `${c.r}-${c.c}`);
+                setHighlightedCells(coords);
+                setTimeout(() => setHighlightedCells([]), 3100);
+            };
+
+            const handleFlushHint = () => {
+                if (sessionCoins < 50) {
+                    showToast("Cần ít nhất 50 xu!", "error");
+                    return;
+                }
+
+                let newGrid = JSON.parse(JSON.stringify(gameGrid));
+                let highlightTargets = [];
+                let spent = 0;
+                let msg = "";
+
+                if (sessionCoins >= 1000) {
+                    msg = "KÍCH HOẠT: Auto-Win Tuyến Chính!";
+                    const path = findPathAStar(newGrid, true);
+                    if(path) {
+                        path.forEach(p => {
+                            if(newGrid[p.r][p.c].type === 'DIRT') newGrid[p.r][p.c].type = 'STRAIGHT';
+                        });
+                    }
+                    spent = Math.min(sessionCoins, 1400);
+                } else if (sessionCoins >= 700) {
+                    msg = "KÍCH HOẠT: Phá hủy vùng 7x7 góc Sink!";
+                    const startR = GRID_SIZE - 7;
+                    const startC = GRID_SIZE - 7;
+                    for (let r = startR; r < GRID_SIZE; r++) {
+                        for (let c = startC; c < GRID_SIZE; c++) {
+                            highlightTargets.push({r, c});
+                            if (newGrid[r][c].type === 'DIRT') {
+                                newGrid[r][c].type = getRandomPipe();
+                            }
+                        }
+                    }
+                    triggerHighlight(highlightTargets);
+                    spent = sessionCoins;
+                } else if (sessionCoins >= 400) {
+                    msg = "KÍCH HOẠT: Dọn vùng 5x10 tiềm năng!";
+                    let bestRegion = {r: 0, c: 0, count: -1};
+                    for(let r=0; r<=GRID_SIZE-5; r++) {
+                        for(let c=0; c<=GRID_SIZE-10; c++) {
+                            let count = 0;
+                            for(let ir=r; ir<r+5; ir++) for(let ic=c; ic<c+10; ic++) if(newGrid[ir][ic].type === 'DIRT') count++;
+                            if(count > bestRegion.count) bestRegion = {r, c, count};
+                        }
+                    }
+                    for(let r=bestRegion.r; r<bestRegion.r+5; r++) {
+                        for(let c=bestRegion.c; c<bestRegion.c+10; c++) {
+                            highlightTargets.push({r, c});
+                            if(newGrid[r][c].type === 'DIRT') newGrid[r][c].type = getRandomPipe();
+                        }
+                    }
+                    triggerHighlight(highlightTargets);
+                    spent = sessionCoins;
+                } else if (sessionCoins >= 200) {
+                    msg = "KÍCH HOẠT: Phá 3 ô đá gần nước nhất!";
+                    const activeCells = [];
+                    newGrid.forEach(row => row.forEach(c => { if(c.active) activeCells.push(c); }));
+                    const dirts = [];
+                    newGrid.forEach(row => row.forEach(c => { if(c.type === 'DIRT') dirts.push(c); }));
+                    const scored = dirts.map(d => {
+                        let min = 99;
+                        activeCells.forEach(a => { const dist = Math.abs(d.r-a.r)+Math.abs(d.c-a.c); if(dist < min) min = dist; });
+                        return { ...d, score: min };
+                    }).sort((a,b) => a.score - b.score).slice(0, 3);
+                    scored.forEach(t => {
+                        highlightTargets.push({r: t.r, c: t.c});
+                        newGrid[t.r][t.c].type = getRandomPipe();
+                    });
+                    triggerHighlight(highlightTargets);
+                    spent = sessionCoins;
+                } else {
+                    msg = "KÍCH HOẠT: Phá 1 ô đá gần nước!";
+                    const activeCells = [];
+                    newGrid.forEach(row => row.forEach(c => { if(c.active) activeCells.push(c); }));
+                    let best = null, minDist = 99;
+                    newGrid.forEach(row => row.forEach(c => {
+                        if(c.type === 'DIRT') {
+                            activeCells.forEach(a => {
+                                const d = Math.abs(c.r-a.r)+Math.abs(c.c-a.c);
+                                if(d < minDist) { minDist = d; best = c; }
+                            });
+                        }
+                    }));
+                    if(best) {
+                        highlightTargets.push({r: best.r, c: best.c});
+                        newGrid[best.r][best.c].type = getRandomPipe();
+                        triggerHighlight(highlightTargets);
+                    }
+                    spent = sessionCoins;
+                }
+
+                const finalCoins = sessionCoins - spent;
+                setSessionCoins(finalCoins);
+                setGameGrid(newGrid);
+                updateFlow(newGrid, finalCoins, shovelCount);
+                showToast(msg, "success");
+                playHintBreak();
+                setIsShopOpen(false);
+            };
+
+            const buyShovels = () => {
+                const qty = parseInt(buyQuantity) || 1;
+                const totalCost = qty * SHOVEL_PRICE;
+                if (qty < 1) { showToast("Số lượng phải ít nhất là 1!", "error"); return; }
+                if (sessionCoins >= totalCost) {
+                    setSessionCoins(prev => prev - totalCost);
+                    setShovelCount(prev => prev + qty);
+                    showToast(`Đã mua ${qty} Xẻng!`, "success");
+                    setBuyQuantity(1); 
+                } else { showToast("Không đủ xu!", "error"); }
+            };
+
+            const generatePuzzle = (keepCoins = false) => {
+                const size = GRID_SIZE;
+                const grid = Array(size).fill(null).map((_, r) => 
+                    Array(size).fill(null).map((_, c) => ({
+                        r, c, type: 'STRAIGHT', rotation: 0, 
+                        isFixed: false, active: false, hasCoin: false
+                    }))
+                );
+                grid[0][0].type = 'SOURCE'; grid[0][0].isFixed = true;
+                grid[0][1].type = 'DIRT'; grid[0][1].isTutorialBlock = true;
+                grid[size-1][size-1].type = 'SINK'; grid[size-1][size-1].isFixed = true;
+                
+                const dirtCount = Math.floor(size * size * 0.38); 
+                let placedDirt = 0;
+                while(placedDirt < dirtCount) {
+                    const r = Math.floor(Math.random() * size), c = Math.floor(Math.random() * size);
+                    if (!grid[r][c].isFixed && !grid[r][c].isTutorialBlock && grid[r][c].type !== 'DIRT') {
+                        grid[r][c].type = 'DIRT'; placedDirt++;
+                    }
+                }
+
+                let placedCoins = 0;
+                while (placedCoins < REQUIRED_COINS_COUNT) {
+                    const r = Math.floor(Math.random() * size);
+                    const c = Math.floor(Math.random() * size);
+                    if (!grid[r][c].isFixed && !grid[r][c].hasCoin) {
+                        grid[r][c].hasCoin = true;
+                        placedCoins++;
+                    }
+                }
+
+                grid.forEach(row => row.forEach(cell => {
+                    if (cell.type !== 'DIRT' && !cell.isFixed) {
+                        cell.type = getRandomPipe();
+                        cell.rotation = Math.floor(Math.random() * 4);
+                    }
+                }));
+
+                setGameGrid(grid);
+                if (!keepCoins) setSessionCoins(0); 
+                setIsWon(false); setIsLost(false); setIsTutorial(true); 
+                setShowTutorialModal(true); 
+                setShovelCount(1); setIsPlaying(true); updateFlow(grid, keepCoins ? sessionCoins : 0, 1);
+                setIsMenuOpen(false);
+            };
+
+            const getConns = (p) => {
+                const base = PIPE_CONNS[p.type] || [0,0,0,0];
+                return [...base.slice(4 - p.rotation), ...base.slice(0, 4 - p.rotation)];
+            };
+
+            const updateFlow = (grid, currentCoins, currentShovels) => {
+                grid.forEach(row => row.forEach(p => p.active = false));
+                const queue = [grid[0][0]];
+                grid[0][0].active = true;
+                let reachedSink = false;
+                let collected = 0;
+
+                while (queue.length > 0) {
+                    const curr = queue.shift();
+                    if (curr.type === 'SINK') reachedSink = true;
+                    if (curr.hasCoin && curr.type !== 'DIRT') { 
+                        curr.hasCoin = false; 
+                        collected += COIN_VALUE; 
+                    }
+                    const conns = getConns(curr);
+                    const dirs = [[-1, 0, 0], [0, 1, 1], [1, 0, 2], [0, -1, 3]];
+                    dirs.forEach(([dr, dc, dirIdx]) => {
+                        if (conns[dirIdx]) {
+                            const nr = curr.r + dr, nc = curr.c + dc;
+                            if (nr >= 0 && nr < GRID_SIZE && nc >= 0 && nc < GRID_SIZE) {
+                                const neigh = grid[nr][nc];
+                                if (!neigh.active && neigh.type !== 'DIRT') {
+                                    if (getConns(neigh)[(dirIdx + 2) % 4]) {
+                                        neigh.active = true; queue.push(neigh);
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+                
+                const finalCoins = currentCoins + collected;
+                if (collected > 0) setSessionCoins(finalCoins);
+                setGameGrid([...grid]);
+                
+                if (reachedSink) {
+                    playCompleteThenWin();
+                    
+                    setTimeout(() => setIsWon(true), 2100);
+                } else checkLoseCondition(grid, finalCoins, currentShovels);
+            };
+
+            const rotatePipe = (r, c) => {
+                playSound("rotate", 0.6);
+                if (isWon || isLost) return;
+                const pipe = gameGrid[r][c];
+                if (pipe.type === 'DIRT') {
+
+                // ❌ không có xẻng → phát error
+                if (shovelCount <= 0) {
+
+                    playSound("error", 0.6);
+                    showToast("Hết xẻng! Hãy vào Shop.", "error");
+
+                    // SHAKE ô bị click
+                    const el = document.getElementById(`pipe-${r}-${c}`);
+                    if (el) {
+                        el.classList.add("shake");
+                        setTimeout(() => el.classList.remove("shake"), 250);
+                    }
+
+                    return;
+                }
+
+                // ✅ có xẻng → mới phát breakrock
+                playSound("breakrock", 0.8);
+
+                const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                newGrid[r][c].type = getRandomPipe();
+
+                const newShovelCount =
+                    pipe.isTutorialBlock ? 3 : shovelCount - 1;
+
+                if (pipe.isTutorialBlock) {
+                    setIsTutorial(false);
+                    showToast("Làm tốt lắm! Tiếp tục phá đá và dẫn nước nhé.", "success");
+                }
+
+                setShovelCount(newShovelCount);
+                setGameGrid(newGrid);
+
+                updateFlow(newGrid, sessionCoins, newShovelCount);
+
+                return;
+            }
+                if (pipe.isFixed || isTutorial) return;
+                const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                newGrid[r][c].rotation = (newGrid[r][c].rotation + 1) % 4;
+                updateFlow(newGrid, sessionCoins, shovelCount);
+            };
+
+            const saveGame = () => {
+
+                const saveData = {
+                    grid: gameGrid,
+                    coins: sessionCoins,
+                    shovels: shovelCount
+                };
+
+                localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+
+                showToast("Đã lưu trận đấu thành công!", "success");
+
+                setIsMenuOpen(false);
+
+                setIsPlaying(false);
+            };
+            const loadGame = () => {
+
+                const raw = localStorage.getItem(SAVE_KEY);
+
+                if (!raw) return false;
+
+                try {
+
+                    const data = JSON.parse(raw);
+
+                    setGameGrid(data.grid);
+                    setSessionCoins(data.coins);
+                    setShovelCount(data.shovels);
+
+                    setIsPlaying(true);
+
+                    return true;
+
+                } catch {
+
+                    return false;
+
+                }
+            };
+
+            const canAfford = sessionCoins >= (buyQuantity * SHOVEL_PRICE);
+
+            if (!isLoggedIn) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center p-6">
+                        <div className="glass-card p-10 max-w-md w-full border-cyan-500/30 text-center animate-in fade-in zoom-in duration-500">
+                            <div className="w-20 h-20 bg-cyan-500 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-cyan-500/20">👨‍🔧</div>
+                            <h1 className="text-3xl font-black text-white mb-2 tracking-tighter uppercase italic">Pipe Master Pro</h1>
+                            <p className="text-slate-400 text-sm mb-8">Hãy nhập tên của bạn để bắt đầu hành trình khai thông sa mạc.</p>
+                            
+                            <form onSubmit={handleLogin} className="space-y-4 text-left">
+                                <div>
+                                    <label className="block text-[10px] font-black text-slate-500 uppercase mb-2 tracking-widest">Tên người chơi</label>
+                                    <input 
+                                        type="text" 
+                                        required
+                                        value={playerName}
+                                        onChange={(e) => setPlayerName(e.target.value)}
+                                        placeholder="Nhập tên..."
+                                        className="w-full login-input px-5 py-4 rounded-xl text-white font-bold placeholder:text-slate-600"
+                                    />
+                                </div>
+                                <button 
+                                    type="submit" 
+                                    disabled={playerName.trim().length < 2}
+                                    className="play-button w-full py-4 rounded-xl font-black text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    VÀO TRÒ CHƠI
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-8">
+                    {toast && (
+                        <div className="toast-container">
+                            <div className={`toast ${toast.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
+                                <span>{toast.type === 'error' ? '⚠️' : '✅'}</span>{toast.message}
+                            </div>
+                        </div>
+                    )}
+                    
+                    <header className="flex flex-col md:flex-row justify-between items-center gap-6">
+                        <div className="flex items-center gap-4">
+                            <div className="w-14 h-14 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl flex items-center justify-center text-2xl shadow-xl">👋</div>
+                            <div>
+                                <h2 className="font-bold text-lg text-slate-200 uppercase tracking-tight">CHÀO, {playerName.toUpperCase()}!</h2>
+                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Sẵn sàng để khai thông?</div>
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/60 border border-white/5 px-4 py-3 rounded-2xl flex items-center gap-3">
+                            <span className="text-xs text-slate-400 font-black uppercase tracking-widest mr-2">SỐ DƯ:</span>
+                            <span className="text-xl">🪙</span>
+                            <span className="font-black text-cyan-400 text-lg">{totalCoins.toLocaleString()}</span>
+                        </div>
+                    </header>
+
+                    {!isPlaying ? (
+                        <div className="space-y-6 max-w-2xl mx-auto">
+                            <div className="glass-card p-12 text-center border-2 border-cyan-500/20 flex flex-col items-center min-h-[400px] justify-center">
+                                <div className="game-logo-text">PIPE MASTER PRO</div>
+                                <div className="game-logo-sub">Desert Pipeline Expedition</div>
+                                
+                                <p className="text-slate-400 mb-8 max-w-sm italic">Xây dựng mạng lưới ống dẫn nước xuyên qua bãi đá cổ. Luôn có ít nhất 30 đồng xu ẩn giấu!</p>
+                                <button onClick={() => {playSound("click", 0.5);const hasSave = loadGame();if(!hasSave){ generatePuzzle(false)};}} className="play-button px-20 py-5 rounded-2xl text-xl font-black mb-10">BẮT ĐẦU TRẬN MỚI</button>
+
+                                {/* Giftcode Section */}
+                                <div className="w-full max-w-xs border-t border-white/10 pt-8">
+                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Nhập Giftcode</div>
+                                    <div className="flex gap-2">
+                                        <input 
+                                            type="text" 
+                                            value={giftCodeInput}
+                                            onChange={(e) => setGiftCodeInput(e.target.value)}
+                                            placeholder="GIFTCODE"
+                                            className="flex-1 login-input px-4 py-3 rounded-xl uppercase font-bold text-sm tracking-widest"
+                                        />
+                                        <button 
+                                            onClick={() => {playSound("click", 0.5); handleRedeemGiftcode();}}
+                                            className="bg-slate-700 hover:bg-slate-600 px-4 py-3 rounded-xl font-bold transition-all text-xs"
+                                        >NHẬN</button>
+                                    </div>
+                                    <div className="mt-2 text-[9px] text-slate-600 font-bold uppercase flex justify-between">
+                                        <span>Thử: PIPEMASTER</span>
+                                        <span>FREE800</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="game-full-overlay">
+                            {isTutorial && (
+                                <div className="tutorial-banner">
+                                    <span className="text-lg">👇</span>
+                                    <span>HÀNH ĐỘNG: CLICK VÀO Ô ĐÁ ĐANG NHẤP NHÁY ĐỂ PHÁ ĐÁ!</span>
+                                    <span className="text-lg">⛏️</span>
+                                </div>
+                            )}
+
+                            <div className="h-20 px-8 flex items-center justify-between bg-slate-900/95 border-b border-white/10">
+                                <div className="relative">
+                                    <button 
+                                        onClick={() => {playSound("click", 0.5); setIsMenuOpen(!isMenuOpen);}} 
+                                        className="w-10 h-10 flex flex-col items-center justify-center gap-1.5 group"
+                                    >
+                                        <div className="w-6 h-0.5 bg-slate-400 group-hover:bg-cyan-400 transition-colors"></div>
+                                        <div className="w-6 h-0.5 bg-slate-400 group-hover:bg-cyan-400 transition-colors"></div>
+                                        <div className="w-6 h-0.5 bg-slate-400 group-hover:bg-cyan-400 transition-colors"></div>
+                                    </button>
+
+                                    {isMenuOpen && (
+                                        <>
+                                            <div className="fixed inset-0 z-[1001]" onClick={() => setIsMenuOpen(false)}></div>
+                                            <div className="absolute top-12 left-0 w-48 glass-card border-white/10 shadow-2xl z-[1002] p-2 animate-in fade-in slide-in-from-top-2 duration-200">
+                                                <button onClick={() => {playSound("click", 0.5); stopGameplay(); playBackground(); saveGame();}} className="menu-item">
+                                                    <span>💾</span> Lưu trận
+                                                </button>
+                                                <button onClick={() => {playSound("click", 0.5); generatePuzzle(false);}} className="menu-item">
+                                                    <span>🔄</span> Chơi lại
+                                                </button>
+                                                <div className="h-px bg-white/5 my-1"></div>
+                                                <button onClick={() => {playSound("click", 0.5); setIsPlaying(false);}} className="menu-item text-red-400 hover:text-red-300 hover:bg-red-500/10">
+                                                    <span>🚪</span> Thoát
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+
+                                <div className="flex gap-6 items-center">
+                                    <div className="text-right">
+                                        <div className="text-[10px] text-slate-500 font-black uppercase">Xu trận</div>
+                                        <div className="text-lg font-black text-cyan-400">{sessionCoins}</div>
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="text-[10px] text-slate-500 font-black uppercase">Xẻng</div>
+                                        <div className="text-lg font-black text-white">⛏️ {shovelCount}</div>
+                                    </div>
+                                    <button onClick={() => {playSound("click", 0.5);setIsShopOpen(true);}} className="px-5 py-2 rounded-xl border border-cyan-500/50 bg-slate-800 text-cyan-400 font-black uppercase text-xs hover:bg-cyan-500 hover:text-black transition-colors">🛒 SHOP / HINT</button>
+                                </div>
+                            </div>
+
+                            {showTutorialModal && (
+                                <div className="fixed inset-0 z-[1000] bg-black/70 backdrop-blur-md flex items-center justify-center p-6">
+                                    <div className="glass-card p-8 max-w-md w-full border-cyan-500/40 text-center">
+                                        <div className="text-5xl mb-4">📖</div>
+                                        <h3 className="text-2xl font-black text-cyan-400 uppercase mb-4 tracking-tighter italic">HƯỚNG DẪN CƠ BẢN</h3>
+                                        <div className="space-y-4 text-left text-slate-300 text-sm mb-8 leading-relaxed">
+                                            <p className="flex gap-3"><span className="text-cyan-400 font-bold">1.</span> Click vào ô 🪨 (Đá) để dùng ⛏️ (Xẻng) phá nó. Có 30 đồng xu 🪙 đang ẩn giấu!</p>
+                                            <p className="flex gap-3"><span className="text-cyan-400 font-bold">2.</span> Nước chảy qua ô có xu sẽ tự động thu thập vào quỹ xu trận đấu.</p>
+                                            <p className="flex gap-3"><span className="text-cyan-400 font-bold">3.</span> Dùng xu nhặt được để mua thêm xẻng trong Shop nếu bị kẹt.</p>
+                                            <div className="bg-orange-500/20 border border-orange-500/40 p-3 rounded-lg mt-2">
+                                                <p className="text-orange-400 font-bold text-center">🎯 Bắt đầu bằng cách click vào ô đá ĐANG NHẤP NHÁY!</p>
+                                            </div>
+                                        </div>
+                                        <button 
+                                            onClick={() => {playSound("click", 0.5); setShowTutorialModal(false);}}
+                                            className="play-button w-full py-4 rounded-xl font-black uppercase shadow-lg shadow-cyan-500/20"
+                                        >TÔI ĐÃ HIỂU!</button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {isShopOpen && (
+                                <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+                                    <div className="glass-card p-8 max-w-md w-full border-cyan-500/40 relative">
+                                        <button onClick={() => {
+                                                            playSound("click", 0.5);setIsShopOpen(false);}} className="absolute top-4 right-4 text-slate-500 hover:text-white text-2xl">&times;</button>
+                                        <h3 className="text-2xl font-black text-cyan-500 uppercase italic mb-6">Cửa hàng Trận đấu</h3>
+                                        <div className="space-y-6">
+                                            <div className="bg-slate-800/50 p-4 rounded-2xl border border-white/5">
+                                                <div className="flex justify-between items-center mb-3">
+                                                    <span className="font-bold text-sm text-slate-300">⛏️ Mua Xẻng</span>
+                                                    <span className="text-xs text-slate-500">{SHOVEL_PRICE} xu / cái</span>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <button onClick={() => {playSound("click", 0.5); setBuyQuantity(q => Math.max(1, q - 1))}} className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center font-black text-xl hover:bg-slate-600">-</button>
+                                                    <input type="number" value={buyQuantity} onChange={(e) => setBuyQuantity(Math.max(1, parseInt(e.target.value) || 0))} className="flex-1 bg-slate-900 border border-white/10 rounded-lg h-10 text-center font-black text-cyan-400 quantity-input" />
+                                                    <button onClick={() => {playSound("click", 0.5); setBuyQuantity(q => q + 1)}} className="w-10 h-10 rounded-lg bg-slate-700 flex items-center justify-center font-black text-xl hover:bg-slate-600">+</button>
+                                                </div>
+                                                <button onClick={() => {playSound("click", 0.5); buyShovels();}} disabled={!canAfford} className={`w-full mt-4 py-3 font-black rounded-xl uppercase text-xs transition-all ${canAfford ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-black shadow-lg shadow-cyan-500/20 active:scale-[0.98]" : "bg-slate-700 text-slate-500 cursor-not-allowed opacity-50"}`}>
+                                                    {canAfford ? `Thanh toán: ${(buyQuantity * SHOVEL_PRICE).toLocaleString()} 🪙` : `Thiếu ${(buyQuantity * SHOVEL_PRICE - sessionCoins).toLocaleString()} xu`}
+                                                </button>
+                                            </div>
+                                            <div className="border-t border-white/10 pt-4">
+                                                <button onClick={() => { playHintBreak(); handleFlushHint();}} disabled={sessionCoins < 50} className="hint-btn">
+                                                    <span className="text-xs uppercase opacity-70">Tự động xả gói cao nhất</span>
+                                                    <span className="text-base">🚀 KÍCH  HOẠT FLUSH HINT</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex-1 flex items-center justify-center p-4 bg-slate-950 overflow-auto">
+                                <div className="pipe-grid" style={{ gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)` }}>
+                                    {gameGrid.map((row, r) => row.map((pipe, c) => (
+                                        <div key={`${r}-${c}`} className={`pipe-cell ${pipe.type === 'DIRT' ? 'is-dirt' : ''} ${pipe.isTutorialBlock && isTutorial ? 'tutorial-highlight' : ''} ${highlightedCells.includes(`${r}-${c}`) ? 'hint-flash' : ''}`} onClick={() => rotatePipe(r, c)}>
+                                            {pipe.hasCoin && (
+                                                <div className="coin-float">
+                                                    <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#fbbf24" stroke="#d97706" strokeWidth="8"/><text x="50" y="65" textAnchor="middle" fontSize="40" fontWeight="bold" fill="#d97706">C</text></svg>
+                                                </div>
+                                            )}
+                                            {pipe.type === 'DIRT' ? (
+                                                <div className="text-lg md:text-xl relative">
+                                                    🪨
+                                                    {pipe.isTutorialBlock && isTutorial && (
+                                                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-orange-500 text-black px-2 py-1 rounded text-[10px] font-black whitespace-nowrap animate-bounce shadow-lg">CLICK ĐỂ PHÁ!</div>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <svg viewBox="0 0 100 100" className="pipe-svg" style={{ transform: `rotate(${pipe.rotation * 90}deg)` }}>
+                                                    <g fill="none" className={pipe.active ? "pipe-active" : "pipe-inactive"}>
+                                                        {pipe.type === 'SOURCE' && <g><rect x="10" y="30" width="30" height="40" rx="4" fill="currentColor"/><path d="M40 50 L100 50" className={pipe.active ? "flowing" : ""}/></g>}
+                                                        {pipe.type === 'SINK' && (
+                                                            <g>
+                                                                <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="4" strokeDasharray="4 4" opacity="0.3"/>
+                                                                <path d="M0 50 L30 50" className={pipe.active ? "flowing" : ""}/>
+                                                                <g className={pipe.active ? "sink-valve-active text-cyan-400" : "text-slate-600"}>
+                                                                    <circle cx="50" cy="50" r="30" stroke="currentColor" strokeWidth="6"/>
+                                                                    <path d="M50 20 L50 80 M20 50 L80 50" stroke="currentColor" strokeWidth="4"/>
+                                                                    <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                                                                    <circle cx="50" cy="20" r="4" fill="currentColor"/>
+                                                                    <circle cx="50" cy="80" r="4" fill="currentColor"/>
+                                                                    <circle cx="20" cy="50" r="4" fill="currentColor"/>
+                                                                    <circle cx="80" cy="50" r="4" fill="currentColor"/>
+                                                                </g>
+                                                            </g>
+                                                        )}
+                                                        {pipe.type === 'STRAIGHT' && <path d="M0 50 L100 50" className={pipe.active ? "flowing" : ""}/>}
+                                                        {pipe.type === 'ELBOW' && <path d="M50 100 Q50 50 100 50" className={pipe.active ? "flowing" : ""}/>}
+                                                        {pipe.type === 'TEE' && <g><path d="M0 50 L100 50"/><path d="M50 50 L50 100" className={pipe.active ? "flowing" : ""}/></g>}
+                                                        {pipe.type === 'CROSS' && <g><path d="M0 50 L100 50"/><path d="M50 0 L50 100" className={pipe.active ? "flowing" : ""}/></g>}
+                                                    </g>
+                                                </svg>
+                                            )}
+                                        </div>
+                                    )))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {isWon && (
+                        <div className="fixed inset-0 z-[10001] bg-black/95 flex items-center justify-center p-6 text-center">
+                            <div className="glass-card p-12 max-w-md w-full border-2 border-cyan-500">
+                                <div className="text-7xl mb-6">🏆</div>
+                                <h2 className="text-4xl font-black text-cyan-400 mb-8 uppercase italic">CHIẾN THẮNG!</h2>
+                                <button onClick={() => {playSound("win", 0.5);stopGameplay();playBackground();localStorage.removeItem(SAVE_KEY); setTotalCoins(prev => prev + sessionCoins + WIN_BONUS); setIsWon(false); setIsPlaying(false); }} className="play-button w-full py-5 rounded-2xl font-black text-xl text-black">NHẬN {sessionCoins + WIN_BONUS} 🪙</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {isLost && (
+                        <div className="fixed inset-0 z-[10001] bg-black/95 flex items-center justify-center p-6 text-center">
+                            <div className="glass-card p-12 max-w-md w-full border-2 border-red-500">
+                                <div className="text-7xl mb-6">💀</div>
+                                <h2 className="text-4xl font-black text-red-500 mb-4 uppercase italic">GAME OVER</h2>
+                                <p className="text-slate-400 mb-8 text-sm italic">Bạn đã hết sạch xẻng và không còn xu nào trên bản đồ để thu thập!</p>
+                                <button onClick={() => {
+                                                        playSound("click", 0.5);stopGameplay();playBackground();localStorage.removeItem(SAVE_KEY);generatePuzzle(false);}} className="play-button w-full py-5 rounded-2xl font-black text-xl text-black bg-gradient-to-r from-red-500 to-orange-500">THỬ LẠI MÀN MỚI</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
