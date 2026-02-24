@@ -145,6 +145,7 @@
             const [giftCodeInput, setGiftCodeInput] = useState("");
             const [usedCodes, setUsedCodes] = useState([]);
             const [hasSaved, setHasSaved] = useState(false);
+            const [tutorialRock, setTutorialRock] = React.useState(null);
 
             useEffect(() => {
 
@@ -181,11 +182,52 @@
                 }
 
             }, [isPlaying, isLoggedIn]);
+const showToast = (message, type = "info") => {
 
-            const showToast = (message, type = 'info') => {
-                setToast({ message, type });
-                setTimeout(() => setToast(null), 3000);
-            };
+    let bg = "bg-slate-700 text-white";
+
+    if (type === "warning")
+        bg = "bg-yellow-400 text-black border-4 border-yellow-600";
+
+    if (type === "error")
+        bg = "bg-red-500 text-white border-4 border-red-700";
+
+    if (type === "success")
+        bg = "bg-green-500 text-white border-4 border-green-700";
+
+
+    // container ở TOP, căn giữa ngang
+    const wrapper = document.createElement("div");
+    wrapper.className =
+        "fixed inset-x-0 top-6 z-[20000] flex justify-center pointer-events-none";
+
+
+    const toast = document.createElement("div");
+    toast.className =
+        `px-10 py-5
+         text-xl md:text-2xl
+         font-black
+         rounded-2xl
+         shadow-2xl
+         ${bg}
+         animate-bounce`;
+
+    toast.innerHTML = message;
+
+    wrapper.appendChild(toast);
+    document.body.appendChild(wrapper);
+
+
+    setTimeout(() => {
+
+        toast.style.opacity = "0";
+        toast.style.transform = "translateY(-10px) scale(0.95)";
+        toast.style.transition = "all 0.3s";
+
+        setTimeout(() => wrapper.remove(), 300);
+
+    }, 2000);
+};
 
             const handleLogin = (e) => {
 
@@ -794,7 +836,27 @@
                             <div className="flex-1 flex items-center justify-center p-4 bg-slate-950 overflow-auto">
                                 <div className="pipe-grid" style={{ gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)` }}>
                                     {gameGrid.map((row, r) => row.map((pipe, c) => (
-                                        <div key={`${r}-${c}`} className={`pipe-cell ${pipe.type === 'DIRT' ? 'is-dirt' : ''} ${pipe.isTutorialBlock && isTutorial ? 'tutorial-highlight' : ''} ${highlightedCells.includes(`${r}-${c}`) ? 'hint-flash' : ''}`} onClick={() => rotatePipe(r, c)}>
+                                        <div key={`${r}-${c}`} className={`pipe-cell ${pipe.type === 'DIRT' ? 'is-dirt' : ''} ${pipe.isTutorialBlock && isTutorial ? 'tutorial-highlight' : ''} ${highlightedCells.includes(`${r}-${c}`) ? 'hint-flash' : ''}`}
+                                    onClick={() => {
+
+    const pipe = gameGrid[r][c];
+
+    // nếu là đất trong tutorial
+    if (pipe.type === "DIRT" && isTutorial) {
+
+        // không phải block đúng → chặn
+        if (!pipe.isTutorialBlock) {
+
+            showToast("⚠️ PHẢI PHÁ KHỐI ĐƯỢC HƯỚNG DẪN!", "warning");
+
+            return;
+        }
+    }
+
+    // gọi logic gốc (phá đất hoặc xoay pipe)
+    rotatePipe(r, c);
+
+}}>
                                             {pipe.hasCoin && (
                                                 <div className="coin-float">
                                                     <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#fbbf24" stroke="#d97706" strokeWidth="8"/><text x="50" y="65" textAnchor="middle" fontSize="40" fontWeight="bold" fill="#d97706">C</text></svg>
@@ -845,7 +907,31 @@
                             <div className="glass-card p-12 max-w-md w-full border-2 border-cyan-500">
                                 <div className="text-7xl mb-6">🏆</div>
                                 <h2 className="text-4xl font-black text-cyan-400 mb-8 uppercase italic">CHIẾN THẮNG!</h2>
-                                <button onClick={() => {playSound("win", 0.5);stopGameplay();playBackground();localStorage.removeItem(SAVE_KEY); setTotalCoins(prev => prev + sessionCoins + WIN_BONUS); setIsWon(false); setIsPlaying(false); }} className="play-button w-full py-5 rounded-2xl font-black text-xl text-black">NHẬN {sessionCoins + WIN_BONUS} 🪙</button>
+                                <button
+                                    onClick={() => {
+
+                                        playSound("win", 0.5);
+
+                                        stopGameplay();
+                                        playBackground();
+
+                                        // cộng coin vào tài khoản chính
+                                        const reward = sessionCoins + WIN_BONUS;
+                                        setTotalCoins(prev => prev + reward);
+
+                                        // reset trạng thái
+                                        setSessionCoins(0);
+                                        setIsWon(false);
+                                        setIsLost(false);
+
+                                        // QUAN TRỌNG: quay về menu chính
+                                        setIsPlaying(false);
+
+                                    }}
+                                    className="play-button w-full py-5 rounded-2xl font-black text-xl text-black"
+                                >
+                                    <span> NHẬN {sessionCoins + WIN_BONUS} 🪙</span>
+                                </button>
                             </div>
                         </div>
                     )}
@@ -856,8 +942,29 @@
                                 <div className="text-7xl mb-6">💀</div>
                                 <h2 className="text-4xl font-black text-red-500 mb-4 uppercase italic">GAME OVER</h2>
                                 <p className="text-slate-400 mb-8 text-sm italic">Bạn đã hết sạch xẻng và không còn xu nào trên bản đồ để thu thập!</p>
-                                <button onClick={() => {
-                                                        playSound("click", 0.5);stopGameplay();playBackground();localStorage.removeItem(SAVE_KEY);generatePuzzle(false);}} className="play-button w-full py-5 rounded-2xl font-black text-xl text-black bg-gradient-to-r from-red-500 to-orange-500">THỬ LẠI MÀN MỚI</button>
+                                <button
+onClick={() => {
+
+    playSound("click", 0.5);
+
+    stopGameplay();
+    playBackground();
+
+    // xóa save
+    localStorage.removeItem(getSaveKey(playerName));
+
+    // reset trạng thái
+    setIsLost(false);
+    setIsWon(false);
+
+    // tạo map mới
+    generatePuzzle(false);
+
+}}
+className="play-button w-full py-5 rounded-2xl font-black text-xl text-black bg-gradient-to-r from-red-500 to-orange-500"
+>
+THỬ LẠI MÀN MỚI
+</button>
                             </div>
                         </div>
                     )}
