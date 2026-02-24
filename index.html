@@ -16,7 +16,7 @@
 
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef } = React;
-        const SAVE_KEY = "pipe_master_save";
+        const getSaveKey = (playerName) => `pipe_master_save_${playerName}`;
 // ===== AUDIO SYSTEM =====
         const AUDIO = {
             rotate: new Audio("audio/xoayong.mp3"),
@@ -144,6 +144,7 @@
             const [buyQuantity, setBuyQuantity] = useState(1);
             const [giftCodeInput, setGiftCodeInput] = useState("");
             const [usedCodes, setUsedCodes] = useState([]);
+            const [hasSaved, setHasSaved] = useState(false);
 
             useEffect(() => {
 
@@ -385,6 +386,7 @@
             };
 
             const generatePuzzle = (keepCoins = false) => {
+                setHasSaved(false);
                 const size = GRID_SIZE;
                 const grid = Array(size).fill(null).map((_, r) => 
                     Array(size).fill(null).map((_, c) => ({
@@ -534,7 +536,8 @@
                     shovels: shovelCount
                 };
 
-                localStorage.setItem(SAVE_KEY, JSON.stringify(saveData));
+                localStorage.setItem(getSaveKey(playerName), JSON.stringify(saveData));
+                setHasSaved(true);
 
                 showToast("Đã lưu trận đấu thành công!", "success");
 
@@ -544,7 +547,7 @@
             };
             const loadGame = () => {
 
-                const raw = localStorage.getItem(SAVE_KEY);
+                const raw = localStorage.getItem(getSaveKey(playerName));
 
                 if (!raw) return false;
 
@@ -691,9 +694,32 @@
                                                     <span>🔄</span> Chơi lại
                                                 </button>
                                                 <div className="h-px bg-white/5 my-1"></div>
-                                                <button onClick={() => {playSound("click", 0.5); setIsPlaying(false);}} className="menu-item text-red-400 hover:text-red-300 hover:bg-red-500/10">
+                                               <button
+                                                    onClick={() => {
+                                                        playSound("click", 0.5);
+
+                                                        if (!hasSaved) {
+                                                            // xóa save của player này
+                                                            localStorage.removeItem(getSaveKey(playerName));
+
+                                                            // reset toàn bộ trạng thái trận hiện tại
+                                                            setGameGrid([]);
+                                                            setSessionCoins(0);
+                                                            setShovelCount(0);
+
+                                                            // reset tutorial để lần sau hiện lại
+                                                            setIsTutorial(false);
+                                                            setShowTutorialModal(false);
+                                                        }
+
+                                                        // đóng menu và về màn hình chính
+                                                        setIsMenuOpen(false);
+                                                        setIsPlaying(false);
+                                                    }}
+                                                    className="menu-item"
+                                                    >
                                                     <span>🚪</span> Thoát
-                                                </button>
+                                                    </button>
                                             </div>
                                         </>
                                     )}
