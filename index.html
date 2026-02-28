@@ -10,6 +10,23 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <style>
+        @keyframes rainbowBorder {
+            0% { border-color: #ff0000; box-shadow: 0 0 16px rgba(255, 0, 0, 0.7), 0 0 32px rgba(255, 0, 0, 0.4); }
+            16.67% { border-color: #ff7f00; box-shadow: 0 0 16px rgba(255, 127, 0, 0.7), 0 0 32px rgba(255, 127, 0, 0.4); }
+            33.33% { border-color: #ffff00; box-shadow: 0 0 16px rgba(255, 255, 0, 0.7), 0 0 32px rgba(255, 255, 0, 0.4); }
+            50% { border-color: #00ff00; box-shadow: 0 0 16px rgba(0, 255, 0, 0.7), 0 0 32px rgba(0, 255, 0, 0.4); }
+            66.67% { border-color: #0000ff; box-shadow: 0 0 16px rgba(0, 0, 255, 0.7), 0 0 32px rgba(0, 0, 255, 0.4); }
+            83.33% { border-color: #4b0082; box-shadow: 0 0 16px rgba(75, 0, 130, 0.7), 0 0 32px rgba(75, 0, 130, 0.4); }
+            100% { border-color: #ff0000; box-shadow: 0 0 16px rgba(255, 0, 0, 0.7), 0 0 32px rgba(255, 0, 0, 0.4); }
+        }
+        .rainbow-border {
+            animation: rainbowBorder 6s linear infinite;
+            max-height: 90vh;
+            max-width: min(90vh, 90vw);
+            aspect-ratio: 1/1;
+        }
+    </style>
 </head>
 <body>
     <div id="root"></div>
@@ -130,7 +147,7 @@
             const [isLoggedIn, setIsLoggedIn] = useState(false);
             const [totalCoins, setTotalCoins] = useState(12840);
             const [shovelCount, setShovelCount] = useState(0);
-            const [sessionCoins, setSessionCoins] = useState(0); 
+            const [sessionCoins, setSessionCoins] = useState(0);
             const [isPlaying, setIsPlaying] = useState(false);
             const [isShopOpen, setIsShopOpen] = useState(false);
             const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -147,6 +164,270 @@
             const [hasSaved, setHasSaved] = useState(false);
             const [tutorialRock, setTutorialRock] = React.useState(null);
 
+            const [isAIVisible, setIsAIVisible] = useState(false);
+
+            // NEW MENU STATES
+            const [mailOpen, setMailOpen] = useState(false);
+            const [notificationsOpen, setNotificationsOpen] = useState(false);
+            const [currentTime, setCurrentTime] = useState(new Date());
+            const [leaderboard, setLeaderboard] = useState([]);
+            const [dailyMissions, setDailyMissions] = useState([]);
+            const [weeklyMissions, setWeeklyMissions] = useState([]);
+            const [leaderboardExpanded, setLeaderboardExpanded] = useState(false);
+            const [missionView, setMissionView] = useState("daily");
+            const [remainingDaily, setRemainingDaily] = useState("24h : 00m");
+            const [remainingWeekly, setRemainingWeekly] = useState("6d : 00h");
+
+            const toggleAI = () => {
+                setIsAIVisible(prev => !prev);
+                if (!isAIVisible) {
+                    runAISolver();
+                }
+            };
+
+            // MAIL SYSTEM
+            const loadMails = () => {
+                const mails = [
+                    { id: 1, title: "🎉 Chào mừng", description: "Chào mừng bạn đến với Pipe Master Pro! Nhận 100 xu quà tặng.", time: "2 giờ trước", coins: 100 },
+                    { id: 2, title: "🆕 Giftcode Tân thủ", description: "Sử dụng mã NEWGAME để nhận 500 xu bonus dành riêng cho người chơi mới.", time: "1 giờ trước", coins: 500 },
+                    { id: 3, title: "📢 Thông báo hệ thống", description: "Cơ chế chơi đã được cập nhật. Hãy khám phá các tính năng mới!", time: "Hôm nay", coins: 0 }
+                ];
+                return mails;
+            };
+
+            const claimMail = (mailId) => {
+                const claimedMails = JSON.parse(localStorage.getItem(`claimed_mails_${playerName}`) || "[]");
+                if (!claimedMails.includes(mailId)) {
+                    claimedMails.push(mailId);
+                    localStorage.setItem(`claimed_mails_${playerName}`, JSON.stringify(claimedMails));
+                    const mail = loadMails().find(m => m.id === mailId);
+                    if (mail && mail.coins > 0) {
+                        setTotalCoins(prev => prev + mail.coins);
+                        showToast(`Đã nhận ${mail.coins} xu từ hòm thư!`, "success");
+                    }
+                    return true;
+                }
+                return false;
+            };
+
+            // MISSION SYSTEM
+            const initializeMissions = () => {
+                const lastResetDaily = localStorage.getItem(`last_reset_daily_${playerName}`);
+                const lastResetWeekly = localStorage.getItem(`last_reset_weekly_${playerName}`);
+                const now = Date.now();
+                const oneDay = 24 * 60 * 60 * 1000;
+                const oneWeek = 7 * 24 * 60 * 60 * 1000;
+
+                let daily = JSON.parse(localStorage.getItem(`missions_daily_${playerName}`) || "null");
+                let weekly = JSON.parse(localStorage.getItem(`missions_weekly_${playerName}`) || "null");
+
+                if (!lastResetDaily || (now - parseInt(lastResetDaily)) > oneDay) {
+                    daily = [
+                        { id: "d1", title: "Chơi 1 trận", progress: 0, target: 1, reward: 50, claimed: false },
+                        { id: "d2", title: "Thu thập 500 xu", progress: 0, target: 500, reward: 100, claimed: false },
+                        { id: "d3", title: "Sử dụng Giftcode", progress: 0, target: 1, reward: 75, claimed: false }
+                    ];
+                    localStorage.setItem(`missions_daily_${playerName}`, JSON.stringify(daily));
+                    localStorage.setItem(`last_reset_daily_${playerName}`, now.toString());
+                }
+
+                if (!lastResetWeekly || (now - parseInt(lastResetWeekly)) > oneWeek) {
+                    weekly = [
+                        { id: "w1", title: "Thắng 3 trận", progress: 0, target: 3, reward: 300, claimed: false },
+                        { id: "w2", title: "Thu thập 3000 xu", progress: 0, target: 3000, reward: 500, claimed: false }
+                    ];
+                    localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(weekly));
+                    localStorage.setItem(`last_reset_weekly_${playerName}`, now.toString());
+                }
+
+                setDailyMissions(daily);
+                setWeeklyMissions(weekly);
+            };
+
+            const updateMissionProgress = (missionId, amount = 1, isWeekly = false) => {
+                const missions = isWeekly ? weeklyMissions : dailyMissions;
+                const mission = missions.find(m => m.id === missionId);
+                if (mission && !mission.claimed) {
+                    mission.progress = Math.min(mission.progress + amount, mission.target);
+                    if (isWeekly) {
+                        setWeeklyMissions([...missions]);
+                        localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(missions));
+                    } else {
+                        setDailyMissions([...missions]);
+                        localStorage.setItem(`missions_daily_${playerName}`, JSON.stringify(missions));
+                    }
+                }
+            };
+
+            const claimMission = (missionId, isWeekly) => {
+                const missions = isWeekly ? weeklyMissions : dailyMissions;
+                const mission = missions.find(m => m.id === missionId);
+                if (mission && !mission.claimed && mission.progress >= mission.target) {
+                    mission.claimed = true;
+                    setTotalCoins(prev => prev + mission.reward);
+                    showToast(`Nhận ${mission.reward} xu từ nhiệm vụ!`, "success");
+                    if (isWeekly) {
+                        setWeeklyMissions([...missions]);
+                        localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(missions));
+                    } else {
+                        setDailyMissions([...missions]);
+                        localStorage.setItem(`missions_daily_${playerName}`, JSON.stringify(missions));
+                    }
+                }
+            };
+
+            // Auto-reload missions when time resets
+            useEffect(() => {
+                if (isLoggedIn && !isPlaying) {
+                    initializeMissions();
+                }
+            }, [isLoggedIn, isPlaying]);
+
+            // LEADERBOARD SYSTEM
+            const loadLeaderboard = () => {
+                let fakeLeaderboard = [
+                    { rank: 1, name: "Alex", coins: 40000, medal: "🥇" },
+                    { rank: 2, name: "John", coins: 35000, medal: "🥈" },
+                    { rank: 3, name: "Lina", coins: 32000, medal: "🥉" }
+                ];
+
+                // Kiểm tra nếu người chơi hiện tại có nhiều coins hơn rank #3
+                if (isLoggedIn && totalCoins > fakeLeaderboard[2].coins) {
+                    // Tìm vị trí để insert người chơi
+                    let insertIndex = fakeLeaderboard.length;
+                    for (let i = 0; i < fakeLeaderboard.length; i++) {
+                        if (totalCoins > fakeLeaderboard[i].coins) {
+                            insertIndex = i;
+                            break;
+                        }
+                    }
+
+                    // Tạo người chơi hiện tại
+                    const currentPlayer = {
+                        rank: insertIndex + 1,
+                        name: playerName,
+                        coins: totalCoins,
+                        medal: insertIndex === 0 ? "🥇" : insertIndex === 1 ? "🥈" : insertIndex === 2 ? "🥉" : ""
+                    };
+
+                    // Insert vào vị trí đúng và cập nhật rank
+                    fakeLeaderboard.splice(insertIndex, 0, currentPlayer);
+
+                    // Cập nhật lại rank cho các phần tử sau
+                    for (let i = insertIndex + 1; i < fakeLeaderboard.length; i++) {
+                        fakeLeaderboard[i].rank = i + 1;
+                        fakeLeaderboard[i].medal = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : "";
+                    }
+
+                    // Chỉ giữ top 3
+                    fakeLeaderboard = fakeLeaderboard.slice(0, 3);
+                }
+
+                setLeaderboard(fakeLeaderboard);
+            };
+
+            // CLOCK SYSTEM
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    setCurrentTime(new Date());
+                }, 1000);
+                return () => clearInterval(timer);
+            }, []);
+
+            // COUNTDOWN SYSTEM FOR MISSIONS
+            useEffect(() => {
+                const updateCountdowns = () => {
+                    const daily = calculateDailyTimeRemaining();
+                    const weekly = calculateWeeklyTimeRemaining();
+                    setRemainingDaily(daily);
+                    setRemainingWeekly(weekly);
+
+                    // AUTO-RELOAD WHEN TIME EXPIRES
+                    if (daily === "0h : 0m" && isLoggedIn) {
+                        initializeMissions();
+                        showToast("📅 Nhiệm vụ hàng ngày đã reset!", "success");
+                    }
+                    if (weekly === "0d : 0h" && isLoggedIn) {
+                        initializeMissions();
+                        showToast("🎯 Nhiệm vụ hàng tuần đã reset!", "success");
+                    }
+                };
+                updateCountdowns();
+                const timer = setInterval(updateCountdowns, 1000);
+                return () => clearInterval(timer);
+            }, [isLoggedIn]);
+
+            const formatTime = () => {
+                const hours = String(currentTime.getHours()).padStart(2, '0');
+                const minutes = String(currentTime.getMinutes()).padStart(2, '0');
+                const date = String(currentTime.getDate()).padStart(2, '0');
+                const month = String(currentTime.getMonth() + 1).padStart(2, '0');
+                return `${hours}:${minutes}`;
+            };
+
+            const calculateDailyTimeRemaining = () => {
+                const now = new Date();
+                const tomorrow = new Date(now);
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                tomorrow.setHours(0, 0, 0, 0);
+                const diff = tomorrow - now;
+                const hours = Math.floor(diff / (1000 * 60 * 60));
+                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+                return `${hours}h : ${minutes}m`;
+            };
+
+            const calculateWeeklyTimeRemaining = () => {
+                const now = new Date();
+                const nextWeek = new Date(now);
+                nextWeek.setDate(nextWeek.getDate() + 7);
+                nextWeek.setHours(0, 0, 0, 0);
+                const diff = nextWeek - now;
+                const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+                const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+                return `${days}d : ${hours}h`;
+            };
+
+            // Initialize on login
+            useEffect(() => {
+                if (isLoggedIn && !isPlaying) {
+                    loadLeaderboard();
+                    initializeMissions();
+                }
+            }, [isLoggedIn, isPlaying, totalCoins]);
+
+            const [aiLogs, setAiLogs] = useState([]); // State để lưu log hiển thị bên phải
+
+            // Simple AI solver placeholder
+            const attemptedRotations = useRef({});
+
+            const runAISolver = async () => {
+                setAiLogs([{time: new Date().toLocaleTimeString(), text: "🤖 AI Starting..."}]);
+
+                let iterations = 0;
+                const maxIterations = 200;
+
+                while (!isWon && isPlaying && iterations < maxIterations) {
+                    iterations++;
+                    await new Promise(r => setTimeout(r, 200));
+
+                    const currentGrid = JSON.parse(JSON.stringify(gameGrid));
+                    const activeCells = [];
+                    currentGrid.forEach(row => row.forEach(cell => {
+                        if (cell.active) activeCells.push(cell);
+                    }));
+
+                    setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: `✓ Iteration ${iterations}: ${activeCells.length} active pipes`}]);
+
+                    if (isWon) {
+                        setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: "🎉 Victory!"}]);
+                        break;
+                    }
+                }
+
+                if (iterations >= maxIterations) {
+                    setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: "⏹️ Max iterations reached"}]);
+                }
+            };
             useEffect(() => {
 
                 // giữ class body như bạn đang dùng
@@ -182,6 +463,7 @@
                 }
 
             }, [isPlaying, isLoggedIn]);
+
 const showToast = (message, type = "info") => {
 
     let bg = "bg-slate-700 text-white";
@@ -261,6 +543,9 @@ const showToast = (message, type = "info") => {
                     setUsedCodes(prev => [...prev, code]);
                     setGiftCodeInput("");
                     showToast(gift.msg, "success");
+
+                    // UPDATE MISSIONS
+                    updateMissionProgress("d3", 1, false); // Sử dụng Giftcode
                 } else {
                     showToast("Mã Giftcode không hợp lệ!", "error");
                 }
@@ -618,9 +903,8 @@ const showToast = (message, type = "info") => {
                 return (
                     <div className="min-h-screen flex items-center justify-center p-6">
                         <div className="glass-card p-10 max-w-md w-full border-cyan-500/30 text-center animate-in fade-in zoom-in duration-500">
-                            <div className="w-20 h-20 bg-cyan-500 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-cyan-500/20">👨‍🔧</div>
-                            <h1 className="text-3xl font-black text-white mb-2 tracking-tighter uppercase italic">Pipe Master Pro</h1>
-                            <p className="text-slate-400 text-sm mb-8">Hãy nhập tên của bạn để bắt đầu hành trình khai thông sa mạc.</p>
+                            <div className="w-20 h-20 bg-cyan-500 rounded-2xl flex items-center justify-center text-4xl mx-auto mb-6 shadow-lg shadow-cyan-500/20">🛠️</div>
+                            <div className="flex items-baseline gap-3"><h1 className="text-5xl font-black uppercase italic tracking-tight bg-gradient-to-r from-cyan-300 to-blue-400 bg-clip-text text-transparent" style={{lineHeight:"1.2",paddingRight:"6px",display:"inline-block"}}>PIPEMASTER</h1><span className="text-xl font-black text-cyan-400/80 uppercase tracking-widest">PRO</span></div>
                             
                             <form onSubmit={handleLogin} className="space-y-4 text-left">
                                 <div>
@@ -657,50 +941,232 @@ const showToast = (message, type = "info") => {
                         </div>
                     )}
                     
-                    <header className="flex flex-col md:flex-row justify-between items-center gap-6">
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl flex items-center justify-center text-2xl shadow-xl">👋</div>
-                            <div>
-                                <h2 className="font-bold text-lg text-slate-200 uppercase tracking-tight">CHÀO, {playerName.toUpperCase()}!</h2>
-                                <div className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Sẵn sàng để khai thông?</div>
-                            </div>
-                        </div>
-                        <div className="bg-slate-900/60 border border-white/5 px-4 py-3 rounded-2xl flex items-center gap-3">
-                            <span className="text-xs text-slate-400 font-black uppercase tracking-widest mr-2">SỐ DƯ:</span>
-                            <span className="text-xl">🪙</span>
-                            <span className="font-black text-cyan-400 text-lg">{totalCoins.toLocaleString()}</span>
-                        </div>
-                    </header>
+
 
                     {!isPlaying ? (
-                        <div className="space-y-6 max-w-2xl mx-auto">
-                            <div className="glass-card p-12 text-center border-2 border-cyan-500/20 flex flex-col items-center min-h-[400px] justify-center">
-                                <div className="game-logo-text">PIPE MASTER PRO</div>
-                                <div className="game-logo-sub">Desert Pipeline Expedition</div>
-                                
-                                <p className="text-slate-400 mb-8 max-w-sm italic">Xây dựng mạng lưới ống dẫn nước xuyên qua bãi đá cổ. Luôn có ít nhất 30 đồng xu ẩn giấu!</p>
-                                <button onClick={() => {playSound("click", 0.5);const hasSave = loadGame();if(!hasSave){ generatePuzzle(false)};}} className="play-button px-20 py-5 rounded-2xl text-xl font-black mb-10">BẮT ĐẦU TRẬN MỚI</button>
+                        <div className="space-y-6 min-h-screen relative overflow-hidden">
+                            {/* ANIMATED BACKGROUND GRADIENT */}
+                            <div className="fixed inset-0 z-0 pointer-events-none">
+                                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-96 bg-cyan-500/10 rounded-full filter blur-3xl animate-pulse" />
+                                <div className="absolute bottom-0 right-0 w-96 h-96 bg-blue-500/10 rounded-full filter blur-3xl animate-pulse delay-1000" />
+                            </div>
 
-                                {/* Giftcode Section */}
-                                <div className="w-full max-w-xs border-t border-white/10 pt-8">
-                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-3">Nhập Giftcode</div>
-                                    <div className="flex gap-2">
-                                        <input 
-                                            type="text" 
-                                            value={giftCodeInput}
-                                            onChange={(e) => setGiftCodeInput(e.target.value)}
-                                            placeholder="GIFTCODE"
-                                            className="flex-1 login-input px-4 py-3 rounded-xl uppercase font-bold text-sm tracking-widest"
-                                        />
-                                        <button 
-                                            onClick={() => {playSound("click", 0.5); handleRedeemGiftcode();}}
-                                            className="bg-slate-700 hover:bg-slate-600 px-4 py-3 rounded-xl font-bold transition-all text-xs"
-                                        >NHẬN</button>
+                            {/* TOP BAR */}
+                            <div className="relative z-10 backdrop-blur-md border-b border-cyan-500/10 bg-slate-950/40">
+                                <div className="max-w-7xl mx-auto px-4 md:px-8 py-4 flex justify-between items-center">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/50">👤</div>
+                                        <div>
+                                            <p className="text-xs text-slate-400 uppercase tracking-widest font-bold">Player</p>
+                                            <p className="text-lg font-black text-cyan-300">{playerName.toUpperCase()}</p>
+                                        </div>
                                     </div>
-                                    <div className="mt-2 text-[9px] text-slate-600 font-bold uppercase flex justify-between">
-                                        <span>Thử: PIPEMASTER</span>
-                                        <span>FREE800</span>
+
+                                    <div className="flex items-center gap-2 justify-center">
+                                        
+                                            <div className="flex items-baseline gap-3"><h1 className="text-5xl font-black uppercase italic tracking-tight bg-gradient-to-r from-cyan-300 to-blue-400 bg-clip-text text-transparent" style={{lineHeight:"1.2",paddingRight:"6px",display:"inline-block"}}>PIPEMASTER</h1><span className="text-xl font-black text-cyan-400/80 uppercase tracking-widest">PRO</span></div>
                                     </div>
+
+                                    <div className="flex items-center gap-6">
+                                        <div className="flex items-center gap-2 bg-slate-900/60 backdrop-blur px-4 py-2 rounded-full border border-cyan-500/20">
+                                            <span className="text-2xl">🪙</span>
+                                            <span className="font-black text-xl text-cyan-300">{totalCoins.toLocaleString()}</span>
+                                        </div>
+
+                                        <div className="relative group">
+                                            <button onClick={() => {playSound("click", 0.5); setNotificationsOpen(!notificationsOpen);}} className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-xl transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/50 active:scale-95 group-hover:scale-110 animate-pulse">🔔</button>
+                                        </div>
+
+                                        <button onClick={() => {playSound("click", 0.5); setIsLoggedIn(false); setPlayerName("");}} className="w-12 h-12 rounded-full bg-gradient-to-br from-red-500 to-red-600 flex items-center justify-center text-xl transition-all duration-300 hover:shadow-lg hover:shadow-red-500/50 active:scale-95 hover:scale-110" title="Đăng xuất">🚪</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* NOTIFICATION MODAL - FIXED AT CENTER */}
+                            {notificationsOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-[9998] bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)} />
+                                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                                        <div className="w-full max-w-md max-h-[80vh] backdrop-blur-xl border border-purple-500/30 shadow-2xl shadow-purple-500/30 p-8 rounded-3xl bg-gradient-to-b from-slate-900/95 to-slate-950/95 animate-in fade-in zoom-in-95 duration-300 overflow-y-auto">
+                                            <div className="flex justify-between items-center mb-6 sticky top-0 bg-gradient-to-b from-slate-900/95 to-slate-950/80 pb-4">
+                                                <h3 className="text-2xl font-black text-purple-400 uppercase tracking-tight">🔔 Thông báo</h3>
+                                                <button onClick={() => setNotificationsOpen(false)} className="text-3xl text-slate-400 hover:text-purple-400 transition-colors">✕</button>
+                                            </div>
+                                            <div className="space-y-3">
+                                                <p className="text-sm text-slate-300 mb-3 leading-relaxed">Chào mừng trở lại, <span className="text-cyan-400 font-black">{playerName}</span>! 🎮</p>
+                                                <div className="bg-gradient-to-r from-green-500/20 to-cyan-500/20 border border-green-500/30 rounded-xl p-3">
+                                                    <p className="text-sm text-slate-300 font-bold">📌 Giftcode Tân Thủ</p>
+                                                    <p className="text-lg font-black text-green-400 mt-1">NEWGAME</p>
+                                                    <p className="text-xs text-slate-400 mt-2">+500 xu cho người chơi mới</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
+
+                            {/* MAIN CONTENT - PERFECT 3 COLUMN GRID */}
+                            <div className="relative z-10 max-w-7xl mx-auto px-4 md:px-8 py-8">
+                                <div style={{display: 'grid', gridTemplateColumns: '320px 1fr 320px', gap: '32px', alignItems: 'stretch'}}>
+
+                                    {/* LEFT PANEL - LEADERBOARD */}
+                                    <div className="space-y-4">
+                                        <div className="backdrop-blur-xl border border-cyan-500/20 bg-gradient-to-br from-slate-900/40 to-slate-950/60 rounded-3xl p-6 shadow-2xl shadow-cyan-500/10 hover:shadow-cyan-500/20 transition-all duration-300">
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-lg">🏆</div>
+                                                <h3 className="text-2xl font-black text-cyan-300 uppercase tracking-tight">Rank</h3>
+                                            </div>
+
+                                            <div className="space-y-3">
+                                                {leaderboard.map((player, idx) => (
+                                                    <div key={player.rank} className={`group p-3 rounded-2xl transition-all duration-300 cursor-pointer transform hover:translateY-1 ${idx < 3 ? "bg-gradient-to-r from-slate-800/80 to-slate-800/40 border-2 border-cyan-500/40 hover:border-cyan-500/70 shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40" : "bg-slate-800/30 border border-cyan-500/10 hover:border-cyan-500/30"}`}>
+                                                        <div className="flex justify-between items-center">
+                                                            <div className="flex items-center gap-3 flex-1">
+                                                                <span className="text-2xl font-black w-8">{player.medal || `#${player.rank}`}</span>
+                                                                <div>
+                                                                    <p className="font-black text-sm text-slate-200">{player.name}</p>
+                                                                    <p className="text-xs text-slate-500">{player.rank === 1 ? "Gold" : player.rank === 2 ? "Silver" : player.rank === 3 ? "Bronze" : "Player"}</p>
+                                                                </div>
+                                                            </div>
+                                                            <span className={`font-black text-sm ${player.rank === 1 ? "text-yellow-400" : player.rank === 2 ? "text-gray-300" : player.rank === 3 ? "text-orange-400" : "text-cyan-400"}`}>{player.coins.toLocaleString()}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* CENTER PANEL - HERO (PERFECTLY CENTERED) */}
+                                    <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '500px'}}>
+                                        <div className="w-full max-w-[600px] backdrop-blur-xl border border-cyan-500/30 bg-gradient-to-b from-slate-900/50 to-slate-950/80 rounded-3xl p-12 shadow-2xl shadow-cyan-500/20 hover:shadow-cyan-500/40 transition-all duration-300 relative overflow-hidden group">
+
+                                            {/* GLOW ANIMATION */}
+                                            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-cyan-500/20 rounded-full filter blur-3xl group-hover:bg-cyan-500/40 transition-all duration-300 pointer-events-none" />
+
+                                            <div className="relative z-10 text-center space-y-6">
+
+                                                <p className="text-slate-300 italic text-sm leading-relaxed max-w-sm">🏜️ Xây dựng lộ trình nước xuyên qua sa mạc cách, khám phá kho tàng 30+ xu ẩn giấu!</p>
+
+                                                {/* GIANT PLAY BUTTON */}
+                                                <button
+                                                    onClick={() => {playSound("click", 0.5);const hasSave = loadGame();if(!hasSave){ generatePuzzle(false)};}}
+                                                    className="group/btn w-64 py-5 rounded-2xl text-2xl font-black uppercase bg-gradient-to-r from-cyan-500 via-blue-500 to-cyan-600 text-black transition-all duration-300 hover:shadow-2xl hover:shadow-cyan-500/60 active:scale-95 hover:scale-105 relative overflow-hidden mx-auto block"
+                                                >
+                                                    <div className="absolute inset-0 bg-white/20 opacity-0 group-hover/btn:opacity-100 transition-opacity duration-300" />
+                                                    <span className="relative flex items-center justify-center gap-3">
+                                                        CHƠI NGAY <span className="text-xl">🛠️</span>
+                                                    </span>
+                                                    <div className="absolute inset-0 rounded-2xl opacity-0 group-hover/btn:opacity-100 group-hover/btn:animate-pulse border-2 border-white/80 pointer-events-none" />
+                                                </button>
+
+                                                {/* GIFTCODE INPUT */}
+                                                <div className="pt-6 border-t border-cyan-500/20 space-y-3">
+                                                    <p className="text-xs font-black text-slate-500 uppercase tracking-widest">Nhập Giftcode</p>
+                                                    <div className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={giftCodeInput}
+                                                            onChange={(e) => setGiftCodeInput(e.target.value)}
+                                                            placeholder="GIFTCODE"
+                                                            className="flex-1 bg-slate-900/80 border border-cyan-500/30 rounded-xl px-4 py-3 uppercase font-black text-sm tracking-widest text-cyan-300 placeholder:text-slate-600 focus:outline-none focus:border-cyan-500/60 focus:shadow-lg focus:shadow-cyan-500/20 transition-all duration-300"
+                                                        />
+                                                        <button
+                                                            onClick={() => {playSound("click", 0.5); handleRedeemGiftcode();}}
+                                                            className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 px-6 py-3 rounded-xl font-black transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/50 active:scale-95 text-sm uppercase"
+                                                        >
+                                                            Nhận
+                                                        </button>
+                                                    </div>
+                                                    <p className="text-[10px] text-slate-600 font-bold uppercase text-center pt-2">
+                                                        Thử: <span className="text-cyan-400">PIPEMASTER</span> • <span className="text-green-400">NEWGAME</span> • <span className="text-yellow-400">FREE800</span>
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* RIGHT PANEL - MISSIONS WITH FLIP */}
+                                    <div className="space-y-4">
+                                        <div className="backdrop-blur-xl border border-cyan-500/20 bg-gradient-to-br from-slate-900/40 to-slate-950/60 rounded-3xl p-6 shadow-2xl shadow-cyan-500/10 hover:shadow-cyan-500/20 transition-all duration-300">
+                                            {/* MISSION TABS WITH COUNTDOWN */}
+                                            <div className="flex gap-2 mb-6">
+                                                <button
+                                                    onClick={() => {playSound("click", 0.5); setMissionView("daily");}}
+                                                    className={`flex-1 py-2 px-3 rounded-lg font-black text-xs uppercase transition-all duration-300 ${missionView === "daily" ? "bg-gradient-to-r from-orange-500 to-yellow-500 text-black shadow-lg shadow-orange-500/50" : "bg-slate-700/50 text-slate-300 hover:bg-slate-700/70 border border-orange-500/20"}`}
+                                                >
+                                                    <div>📅 Hôm Nay</div>
+                                                    <div className="text-[9px] opacity-80 font-mono">{remainingDaily}</div>
+                                                </button>
+                                                <button
+                                                    onClick={() => {playSound("click", 0.5); setMissionView("weekly");}}
+                                                    className={`flex-1 py-2 px-3 rounded-lg font-black text-xs uppercase transition-all duration-300 ${missionView === "weekly" ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg shadow-purple-500/50" : "bg-slate-700/50 text-slate-300 hover:bg-slate-700/70 border border-purple-500/20"}`}
+                                                >
+                                                    <div>🎯 Tuần</div>
+                                                    <div className="text-[9px] opacity-80 font-mono">{remainingWeekly}</div>
+                                                </button>
+                                            </div>
+
+                                            {/* MISSIONS CONTAINER WITH FLIP */}
+                                            <div style={{perspective: '1000px', minHeight: '300px', position: 'relative'}}>
+                                                <div style={{
+                                                    transformStyle: 'preserve-3d',
+                                                    transition: 'transform 0.6s ease-in-out',
+                                                    transform: missionView === 'weekly' ? 'rotateY(180deg)' : 'rotateY(0deg)',
+                                                    width: '100%',
+                                                    position: 'relative'
+                                                }}>
+                                                    {/* DAILY MISSIONS - FRONT */}
+                                                    <div style={{backfaceVisibility: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start', width: '100%', position: 'relative', zIndex: missionView === 'daily' ? 1 : 0}}>
+                                                        <div className="space-y-3 w-full">
+                                                            {dailyMissions.map((mission) => (
+                                                                <div key={mission.id} className="bg-orange-500/5 border border-orange-500/20 rounded-2xl p-3 hover:border-orange-500/40 transition-all duration-300 group/mission hover:shadow-lg hover:shadow-orange-500/10 transform hover:translateY-1 w-full">
+                                                                    <div className="flex justify-between items-center mb-2">
+                                                                        <p className="text-xs font-bold text-slate-300">{mission.title}</p>
+                                                                        <span className="text-xs font-black text-orange-400">+{mission.reward}</span>
+                                                                    </div>
+                                                                    <div className="w-full bg-slate-900/60 rounded-full h-2 mb-2 overflow-hidden border border-orange-500/20">
+                                                                        <div className="bg-gradient-to-r from-orange-400 to-yellow-500 h-2 rounded-full transition-all duration-500" style={{width: `${(mission.progress / mission.target) * 100}%`}} />
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {playSound("click", 0.5); claimMission(mission.id, false);}}
+                                                                        disabled={mission.claimed || mission.progress < mission.target}
+                                                                        className={`w-full py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-300 ${mission.claimed ? "bg-slate-700/60 text-slate-500 opacity-50 cursor-not-allowed" : mission.progress < mission.target ? "bg-slate-700/60 text-slate-500 opacity-75 cursor-not-allowed" : "bg-gradient-to-r from-orange-500 to-yellow-500 text-black hover:shadow-lg hover:shadow-orange-500/50 active:scale-95 hover:scale-105"}`}
+                                                                    >
+                                                                        {mission.claimed ? "✓ Đã nhận" : mission.progress < mission.target ? `${mission.progress}/${mission.target}` : "Nhận"}
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* WEEKLY MISSIONS - BACK (FLIPPED) */}
+                                                    <div style={{backfaceVisibility: 'hidden', transform: 'rotateY(180deg)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'flex-start', width: '100%', position: 'absolute', top: 0, left: 0, zIndex: missionView === 'weekly' ? 1 : 0}}>
+                                                        <div className="space-y-3 w-full">
+                                                            {weeklyMissions.map((mission) => (
+                                                                <div key={mission.id} className="bg-purple-500/5 border border-purple-500/20 rounded-2xl p-3 hover:border-purple-500/40 transition-all duration-300 group/mission hover:shadow-lg hover:shadow-purple-500/10 transform hover:translateY-1 w-full">
+                                                                    <div className="flex justify-between items-center mb-2">
+                                                                        <p className="text-xs font-bold text-slate-300">{mission.title}</p>
+                                                                        <span className="text-xs font-black text-purple-400">+{mission.reward}</span>
+                                                                    </div>
+                                                                    <div className="w-full bg-slate-900/60 rounded-full h-2 mb-2 overflow-hidden border border-purple-500/20">
+                                                                        <div className="bg-gradient-to-r from-purple-400 to-pink-500 h-2 rounded-full transition-all duration-500" style={{width: `${(mission.progress / mission.target) * 100}%`}} />
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={() => {playSound("click", 0.5); claimMission(mission.id, true);}}
+                                                                        disabled={mission.claimed || mission.progress < mission.target}
+                                                                        className={`w-full py-1.5 rounded-lg text-xs font-black uppercase transition-all duration-300 ${mission.claimed ? "bg-slate-700/60 text-slate-500 opacity-50 cursor-not-allowed" : mission.progress < mission.target ? "bg-slate-700/60 text-slate-500 opacity-75 cursor-not-allowed" : "bg-gradient-to-r from-purple-500 to-pink-500 text-white hover:shadow-lg hover:shadow-purple-500/50 active:scale-95 hover:scale-105"}`}
+                                                                    >
+                                                                        {mission.claimed ? "✓ Đã nhận" : mission.progress < mission.target ? `${mission.progress}/${mission.target}` : "Nhận"}
+                                                                    </button>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                 </div>
                             </div>
                         </div>
@@ -711,6 +1177,40 @@ const showToast = (message, type = "info") => {
                                     <span className="text-lg">👇</span>
                                     <span>HÀNH ĐỘNG: CLICK VÀO Ô ĐÁ ĐANG NHẤP NHÁY ĐỂ PHÁ ĐÁ!</span>
                                     <span className="text-lg">⛏️</span>
+                                </div>
+                            )}
+
+                            {/* AI LOG PANEL - RIGHT SIDE */}
+                            {isAIVisible && (
+                                <div className="fixed right-0 top-24 bottom-0 w-80 bg-slate-950/95 border-l border-cyan-500/30 backdrop-blur-xl overflow-hidden flex flex-col z-[100]">
+                                    <div className="p-4 border-b border-cyan-500/20 bg-gradient-to-r from-cyan-500/20 to-blue-500/10">
+                                        <h3 className="font-black text-cyan-300 uppercase text-sm tracking-tight">🤖 AI SOLVER LOG</h3>
+                                        <p className="text-[10px] text-cyan-400/70 mt-1">Real-time execution trace</p>
+                                    </div>
+
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                                        {aiLogs && aiLogs.length > 0 ? (
+                                            aiLogs.map((log, idx) => (
+                                                <div key={idx} className="bg-slate-900/70 border border-cyan-500/20 rounded-lg p-3 hover:border-cyan-500/40 transition-all text-sm animate-in fade-in slide-in-from-right-4 duration-300">
+                                                    <div className="flex justify-between items-start gap-2 mb-1">
+                                                        <span className="text-cyan-400 font-black text-xs">{typeof log === 'string' ? '▸' : log.time}</span>
+                                                        {typeof log === 'string' && <span className="text-cyan-300 flex-1">{log}</span>}
+                                                    </div>
+                                                    {typeof log !== 'string' && (
+                                                        <p className="text-slate-300 text-xs leading-relaxed">{log.text}</p>
+                                                    )}
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="text-center text-slate-500 text-sm py-6">Waiting for AI...</div>
+                                        )}
+                                    </div>
+
+                                    <div className="p-3 border-t border-cyan-500/20 bg-slate-900/50 text-[10px] text-slate-400 space-y-1">
+                                        <div>⛏️ Shovels: {shovelCount}</div>
+                                        <div>💰 Coins: {sessionCoins}</div>
+                                        <div>📊 Status: {isWon ? '🎉 WON' : isLost ? '💀 LOST' : '▶ RUNNING'}</div>
+                                    </div>
                                 </div>
                             )}
 
@@ -734,6 +1234,9 @@ const showToast = (message, type = "info") => {
                                                 </button>
                                                 <button onClick={() => {playSound("click", 0.5); generatePuzzle(false);}} className="menu-item">
                                                     <span>🔄</span> Chơi lại
+                                                </button>
+                                                <button onClick={() => {playSound("click", 0.5); toggleAI();}} className="menu-item">
+                                                    <span>🤖</span> AI
                                                 </button>
                                                 <div className="h-px bg-white/5 my-1"></div>
                                                <button
@@ -833,8 +1336,10 @@ const showToast = (message, type = "info") => {
                                 </div>
                             )}
 
-                            <div className="flex-1 flex items-center justify-center p-4 bg-slate-950 overflow-auto">
-                                <div className="pipe-grid" style={{ gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)` }}>
+                            <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 min-w-0">
+
+                                <div className="rainbow-border border-2 rounded-2xl overflow-hidden bg-slate-900/50 shadow-2xl w-full h-full">
+                                    <div className="pipe-grid" style={{ gridTemplateColumns: `repeat(${GRID_SIZE}, 1fr)` }}>
                                     {gameGrid.map((row, r) => row.map((pipe, c) => (
                                         <div key={`${r}-${c}`} className={`pipe-cell ${pipe.type === 'DIRT' ? 'is-dirt' : ''} ${pipe.isTutorialBlock && isTutorial ? 'tutorial-highlight' : ''} ${highlightedCells.includes(`${r}-${c}`) ? 'hint-flash' : ''}`}
                                     onClick={() => {
@@ -866,7 +1371,7 @@ const showToast = (message, type = "info") => {
                                                 <div className="text-lg md:text-xl relative">
                                                     🪨
                                                     {pipe.isTutorialBlock && isTutorial && (
-                                                        <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-orange-500 text-black px-2 py-1 rounded text-[10px] font-black whitespace-nowrap animate-bounce shadow-lg">CLICK ĐỂ PHÁ!</div>
+                                                        <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-orange-500 text-black px-2 py-1 rounded text-[10px] font-black whitespace-nowrap animate-bounce shadow-lg">CLICK ĐỂ PHÁ!</div>
                                                     )}
                                                 </div>
                                             ) : (
@@ -898,6 +1403,7 @@ const showToast = (message, type = "info") => {
                                         </div>
                                     )))}
                                 </div>
+                                </div>
                             </div>
                         </div>
                     )}
@@ -918,6 +1424,12 @@ const showToast = (message, type = "info") => {
                                         // cộng coin vào tài khoản chính
                                         const reward = sessionCoins + WIN_BONUS;
                                         setTotalCoins(prev => prev + reward);
+
+                                        // UPDATE MISSIONS
+                                        updateMissionProgress("d1", 1, false); // Chơi 1 trận
+                                        updateMissionProgress("w1", 1, true);  // Thắng 3 trận
+                                        updateMissionProgress("d2", reward, false); // Thu thập 500 xu
+                                        updateMissionProgress("w2", reward, true);  // Thu thập 3000 xu
 
                                         // reset trạng thái
                                         setSessionCoins(0);
