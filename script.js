@@ -17,10 +17,10 @@ const FLOW_SKINS = {
   candy:   { id: "candy",   name: "Kẹo Ngọt",       icon: "🍭", color: "#ff67de", glow: "#ff4fd8", price: 14000 },
   blood:   { id: "blood",   name: "Dòng Máu",       icon: "🧛", color: "#ff0000", glow: "#be123c", price: 16000 },
   wine:    { id: "wine",    name: "Rượu Nho",       icon: "🍇", color: "#630e55", glow: "#7c2d12", price: 18000 },
-  void:    { id: "void",    name: "Hư Không",       icon: "🌌", color: "#1e022e", glow: "#7c3aed", price: 20000 },
+  void:    { id: "void",    name: "Hư Không",       icon: "🌌", color: "#1e022e", glow: "#470dac", price: 20000 },
   ocean:   { id: "ocean",   name: "Biển Sâu",       icon: "🌊", color: "#1c3a8d", glow: "#1e3a8a", price: 22000 },
   frozen:  { id: "frozen",  name: "Băng Tuyết",     icon: "❄️", color: "#b1d0e4", glow: "#e0f2fe", price: 24000 },
-  neon:    { id: "uv",    name: "Tia cực tím",     icon: "⚡", color: "#ff00eafa", glow: "#2dd4bf", price: 26000 },
+  neon:    { id: "neon",    name: "Huyền Bí",     icon: "🎆", color: "#ff00eafa", glow: "#ad2dd4", price: 26000 },
   silver:  { id: "silver",  name: "Bạch Kim",       icon: "🥈", color: "#bee6e4", glow: "#94a3b8", price: 28000 },
   gold:    { id: "gold",    name: "Vàng Ròng",      icon: "🥇", color: "#fff700", glow: "#fbbf24", price: 30000 }
 };
