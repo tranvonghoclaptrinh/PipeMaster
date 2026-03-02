@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pipe Master Pro - Giftcode Update</title>
+    <title>Pipe Master Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -11,21 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <style>
-        @keyframes rainbowBorder {
-            0% { border-color: #ff0000; box-shadow: 0 0 16px rgba(255, 0, 0, 0.7), 0 0 32px rgba(255, 0, 0, 0.4); }
-            16.67% { border-color: #ff7f00; box-shadow: 0 0 16px rgba(255, 127, 0, 0.7), 0 0 32px rgba(255, 127, 0, 0.4); }
-            33.33% { border-color: #ffff00; box-shadow: 0 0 16px rgba(255, 255, 0, 0.7), 0 0 32px rgba(255, 255, 0, 0.4); }
-            50% { border-color: #00ff00; box-shadow: 0 0 16px rgba(0, 255, 0, 0.7), 0 0 32px rgba(0, 255, 0, 0.4); }
-            66.67% { border-color: #0000ff; box-shadow: 0 0 16px rgba(0, 0, 255, 0.7), 0 0 32px rgba(0, 0, 255, 0.4); }
-            83.33% { border-color: #4b0082; box-shadow: 0 0 16px rgba(75, 0, 130, 0.7), 0 0 32px rgba(75, 0, 130, 0.4); }
-            100% { border-color: #ff0000; box-shadow: 0 0 16px rgba(255, 0, 0, 0.7), 0 0 32px rgba(255, 0, 0, 0.4); }
-        }
-        .rainbow-border {
-            animation: rainbowBorder 6s linear infinite;
-            max-height: 90vh;
-            max-width: min(90vh, 90vw);
-            aspect-ratio: 1/1;
-        }
+
     </style>
 </head>
 <body>
@@ -33,6 +19,26 @@
 
     <script type="text/babel">
         const { useState, useEffect, useCallback, useMemo, useRef } = React;
+        
+        function exportGameState(){
+
+        return {
+        grid: gameGrid.map(row =>
+        row.map(cell => ({
+        type: cell.type,
+        pipeType: cell.pipeType,
+        rotation: cell.rotation,
+        destroyed: cell.destroyed || false
+        }))
+        ),
+        coins: coins,
+        shovels: shovels,
+        shovelCost: 50
+        };
+
+        }
+
+        window.exportGameState = exportGameState;
         const getSaveKey = (playerName) => `pipe_master_save_${playerName}`;
 // ===== AUDIO SYSTEM =====
         const AUDIO = {
@@ -136,16 +142,19 @@
             DIRT: [0, 0, 0, 0]
         };
 
+
         const GIFT_CODES = {
             'PIPEMASTER': { coins: 2000, msg: "Quà tặng Pipe Master! Nhận 2000 xu." },
-            'FREE800': { coins: 800, msg: "Nhận 800 xu miễn phí!" },
-            'NEWGAME': { coins: 500, msg: "Chào mừng người chơi mới! Nhận 500 xu." }
+            'FREECOINS': { coins: 800, msg: "Nhận 800 xu miễn phí!" },
+            'NEWBIE': { coins: 500, msg: "Chào mừng người chơi mới! Nhận 500 xu." },
+            'TOP1SERVER': { coins: 9999999, msg: "Bạn đã tìm thấy mã TOP1SERVER! Nhận 9999999 xu." }
         };
 
         const App = () => {
             const [playerName, setPlayerName] = useState("");
             const [isLoggedIn, setIsLoggedIn] = useState(false);
-            const [totalCoins, setTotalCoins] = useState(12840);
+            const [totalCoins, setTotalCoins] = useState(() => {
+            const saved = localStorage.getItem(`pipe_master_save_${playerName}`);return saved ? JSON.parse(saved).coins : 12840;});
             const [shovelCount, setShovelCount] = useState(0);
             const [sessionCoins, setSessionCoins] = useState(0);
             const [isPlaying, setIsPlaying] = useState(false);
@@ -177,19 +186,23 @@
             const [missionView, setMissionView] = useState("daily");
             const [remainingDaily, setRemainingDaily] = useState("24h : 00m");
             const [remainingWeekly, setRemainingWeekly] = useState("6d : 00h");
-
+            const [equippedSkinId, setEquippedSkinId] = useState(() => {
+            const saved = localStorage.getItem(`skin_data_${playerName}`);return saved ? JSON.parse(saved).equippedSkin : "default";});
+            const [ownedSkins, setOwnedSkins] = useState(() => {
+            const saved = localStorage.getItem(`skin_data_${playerName}`);
+            return saved ? JSON.parse(saved).ownedSkins : ["default"];});
+            const [showShop, setShowShop] = useState(false);
+            const currentSkin = FLOW_SKINS[equippedSkinId] || FLOW_SKINS.default;
             const toggleAI = () => {
                 setIsAIVisible(prev => !prev);
-                if (!isAIVisible) {
-                    runAISolver();
-                }
+                if (window.toggleAI) window.toggleAI();
             };
 
             // MAIL SYSTEM
             const loadMails = () => {
                 const mails = [
                     { id: 1, title: "🎉 Chào mừng", description: "Chào mừng bạn đến với Pipe Master Pro! Nhận 100 xu quà tặng.", time: "2 giờ trước", coins: 100 },
-                    { id: 2, title: "🆕 Giftcode Tân thủ", description: "Sử dụng mã NEWGAME để nhận 500 xu bonus dành riêng cho người chơi mới.", time: "1 giờ trước", coins: 500 },
+                    { id: 2, title: "🆕 Giftcode Tân thủ", description: "Sử dụng mã NEWBIE để nhận 500 xu bonus dành riêng cho người chơi mới.", time: "1 giờ trước", coins: 500 },
                     { id: 3, title: "📢 Thông báo hệ thống", description: "Cơ chế chơi đã được cập nhật. Hãy khám phá các tính năng mới!", time: "Hôm nay", coins: 0 }
                 ];
                 return mails;
@@ -286,9 +299,9 @@
             // LEADERBOARD SYSTEM
             const loadLeaderboard = () => {
                 let fakeLeaderboard = [
-                    { rank: 1, name: "Alex", coins: 40000, medal: "🥇" },
-                    { rank: 2, name: "John", coins: 35000, medal: "🥈" },
-                    { rank: 3, name: "Lina", coins: 32000, medal: "🥉" }
+                    { rank: 1, name: "Anh thợ may mắn", coins: 40000, medal: "🥇" },
+                    { rank: 2, name: "Nàng Thơ nặng", coins: 35000, medal: "🥈" },
+                    { rank: 3, name: "Chú Tư", coins: 32000, medal: "🥉" }
                 ];
 
                 // Kiểm tra nếu người chơi hiện tại có nhiều coins hơn rank #3
@@ -397,37 +410,41 @@
 
             const [aiLogs, setAiLogs] = useState([]); // State để lưu log hiển thị bên phải
 
-            // Simple AI solver placeholder
-            const attemptedRotations = useRef({});
-
-            const runAISolver = async () => {
-                setAiLogs([{time: new Date().toLocaleTimeString(), text: "🤖 AI Starting..."}]);
-
-                let iterations = 0;
-                const maxIterations = 200;
-
-                while (!isWon && isPlaying && iterations < maxIterations) {
-                    iterations++;
-                    await new Promise(r => setTimeout(r, 200));
-
-                    const currentGrid = JSON.parse(JSON.stringify(gameGrid));
-                    const activeCells = [];
-                    currentGrid.forEach(row => row.forEach(cell => {
-                        if (cell.active) activeCells.push(cell);
-                    }));
-
-                    setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: `✓ Iteration ${iterations}: ${activeCells.length} active pipes`}]);
-
-                    if (isWon) {
-                        setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: "🎉 Victory!"}]);
-                        break;
+            // initialize solver once and keep reference to latest state
+            useEffect(() => {
+                window.initPipeAI({
+                    getState: () => ({
+                        grid: gameGrid,
+                        coins: sessionCoins,
+                        shovels: shovelCount,
+                        shovelCost: SHOVEL_PRICE
+                    }),
+                    actions: {
+                        rotate: (r,c,rot) => {
+                            const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                            newGrid[r][c].rotation = rot;
+                            updateFlow(newGrid, sessionCoins, shovelCount);
+                            setGameGrid(newGrid);
+                        },
+                        destroy: (r,c) => {
+                            const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                            newGrid[r][c].type = getRandomPipe();
+                            setShovelCount(shovelCount - 1);
+                            updateFlow(newGrid, sessionCoins, shovelCount - 1);
+                            setGameGrid(newGrid);
+                        },
+                        buy: () => {
+                            if (sessionCoins >= SHOVEL_PRICE) {
+                                setSessionCoins(sessionCoins - SHOVEL_PRICE);
+                                setShovelCount(shovelCount + 1);
+                            }
+                        }
+                    },
+                    logger: (msg) => {
+                        setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: msg}]);
                     }
-                }
-
-                if (iterations >= maxIterations) {
-                    setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: "⏹️ Max iterations reached"}]);
-                }
-            };
+                });
+            }, []);
             useEffect(() => {
 
                 // giữ class body như bạn đang dùng
@@ -464,7 +481,30 @@
 
             }, [isPlaying, isLoggedIn]);
 
-const showToast = (message, type = "info") => {
+            useEffect(() => {
+                if (isPlaying) {
+                    SkinManager.applySkin(equippedSkinId);
+                    
+                }
+            }, [GRID_SIZE, equippedSkinId]);
+            useEffect(() => {
+                const handleSkinUpdate = (e) => {
+                    setEquippedSkinId(e.detail.skinId);
+                };
+                const handleCoinUpdate = (e) => {
+                    setTotalCoins(e.detail.newCoins);
+                };
+
+                window.addEventListener('updateReactSkin', handleSkinUpdate);
+                window.addEventListener('updateReactCoins', handleCoinUpdate);
+                
+                return () => {
+                    window.removeEventListener('updateReactSkin', handleSkinUpdate);
+                    window.removeEventListener('updateReactCoins', handleCoinUpdate);
+                };
+            }, []);
+
+    const showToast = (message, type = "info") => {
 
     let bg = "bg-slate-700 text-white";
 
@@ -712,52 +752,80 @@ const showToast = (message, type = "info") => {
                 } else { showToast("Không đủ xu!", "error"); }
             };
 
-            const generatePuzzle = (keepCoins = false) => {
-                setHasSaved(false);
-                const size = GRID_SIZE;
-                const grid = Array(size).fill(null).map((_, r) => 
-                    Array(size).fill(null).map((_, c) => ({
-                        r, c, type: 'STRAIGHT', rotation: 0, 
-                        isFixed: false, active: false, hasCoin: false
-                    }))
-                );
-                grid[0][0].type = 'SOURCE'; grid[0][0].isFixed = true;
-                grid[0][1].type = 'DIRT'; grid[0][1].isTutorialBlock = true;
-                grid[size-1][size-1].type = 'SINK'; grid[size-1][size-1].isFixed = true;
-                
-                const dirtCount = Math.floor(size * size * 0.38); 
-                let placedDirt = 0;
-                while(placedDirt < dirtCount) {
-                    const r = Math.floor(Math.random() * size), c = Math.floor(Math.random() * size);
-                    if (!grid[r][c].isFixed && !grid[r][c].isTutorialBlock && grid[r][c].type !== 'DIRT') {
-                        grid[r][c].type = 'DIRT'; placedDirt++;
-                    }
-                }
+const generatePuzzle = (keepCoins = false) => {
+    // 1. Reset trạng thái lưu và lấy dữ liệu Skin mới nhất
+    setHasSaved(false);
+    
+    // Load skin data của người chơi hiện tại để React đồng bộ giao diện
+    const skinData = SkinManager.loadSkinData(playerName);
+    if (skinData && skinData.equippedSkin) {
+        setEquippedSkinId(skinData.equippedSkin);
+    }
 
-                let placedCoins = 0;
-                while (placedCoins < REQUIRED_COINS_COUNT) {
-                    const r = Math.floor(Math.random() * size);
-                    const c = Math.floor(Math.random() * size);
-                    if (!grid[r][c].isFixed && !grid[r][c].hasCoin) {
-                        grid[r][c].hasCoin = true;
-                        placedCoins++;
-                    }
-                }
+    const size = GRID_SIZE;
+    // 2. Khởi tạo Grid trắng
+    const grid = Array(size).fill(null).map((_, r) => 
+        Array(size).fill(null).map((_, c) => ({
+            r, c, type: 'STRAIGHT', rotation: 0, 
+            isFixed: false, active: false, hasCoin: false
+        }))
+    );
 
-                grid.forEach(row => row.forEach(cell => {
-                    if (cell.type !== 'DIRT' && !cell.isFixed) {
-                        cell.type = getRandomPipe();
-                        cell.rotation = Math.floor(Math.random() * 4);
-                    }
-                }));
+    // 3. Đặt các khối cố định (Nguồn, Đích, Tutorial)
+    grid[0][0].type = 'SOURCE'; 
+    grid[0][0].isFixed = true;
+    grid[0][1].type = 'DIRT'; 
+    grid[0][1].isTutorialBlock = true;
+    grid[size-1][size-1].type = 'SINK'; 
+    grid[size-1][size-1].isFixed = true;
+    
+    // 4. Đặt vật cản (Đất)
+    const dirtCount = Math.floor(size * size * 0.38); 
+    let placedDirt = 0;
+    while(placedDirt < dirtCount) {
+        const r = Math.floor(Math.random() * size);
+        const c = Math.floor(Math.random() * size);
+        if (!grid[r][c].isFixed && !grid[r][c].isTutorialBlock && grid[r][c].type !== 'DIRT') {
+            grid[r][c].type = 'DIRT'; 
+            placedDirt++;
+        }
+    }
 
-                setGameGrid(grid);
-                if (!keepCoins) setSessionCoins(0); 
-                setIsWon(false); setIsLost(false); setIsTutorial(true); 
-                setShowTutorialModal(true); 
-                setShovelCount(1); setIsPlaying(true); updateFlow(grid, keepCoins ? sessionCoins : 0, 1);
-                setIsMenuOpen(false);
-            };
+    // 5. Đặt tiền vàng
+    let placedCoins = 0;
+    while (placedCoins < REQUIRED_COINS_COUNT) {
+        const r = Math.floor(Math.random() * size);
+        const c = Math.floor(Math.random() * size);
+        if (!grid[r][c].isFixed && !grid[r][c].hasCoin) {
+            grid[r][c].hasCoin = true;
+            placedCoins++;
+        }
+    }
+
+    // 6. Ngẫu nhiên hóa các loại ống và hướng xoay
+    grid.forEach(row => row.forEach(cell => {
+        if (cell.type !== 'DIRT' && !cell.isFixed) {
+            cell.type = getRandomPipe();
+            cell.rotation = Math.floor(Math.random() * 4);
+        }
+    }));
+
+    // 7. Cập nhật State cho Game
+    setGameGrid(grid);
+    if (!keepCoins) setSessionCoins(0); 
+    
+    setIsWon(false); 
+    setIsLost(false); 
+    setIsTutorial(true); 
+    setShowTutorialModal(true); 
+    setShovelCount(1); 
+    setIsPlaying(true); 
+    setIsMenuOpen(false);
+
+    // 8. Cập nhật dòng chảy - Nước sẽ mang màu skin ngay lập tức
+    // Đảm bảo hàm updateFlow sử dụng skinData.equippedSkin để tính toán nếu cần
+    updateFlow(grid, keepCoins ? sessionCoins : 0, 1);
+};
 
             const getConns = (p) => {
                 const base = PIPE_CONNS[p.type] || [0,0,0,0];
@@ -885,7 +953,7 @@ const showToast = (message, type = "info") => {
                     setGameGrid(data.grid);
                     setSessionCoins(data.coins);
                     setShovelCount(data.shovels);
-
+                    setHasSaved(false);
                     setIsPlaying(true);
 
                     return true;
@@ -900,6 +968,7 @@ const showToast = (message, type = "info") => {
             const canAfford = sessionCoins >= (buyQuantity * SHOVEL_PRICE);
 
             if (!isLoggedIn) {
+                
                 return (
                     <div className="min-h-screen flex items-center justify-center p-6">
                         <div className="glass-card p-10 max-w-md w-full border-cyan-500/30 text-center animate-in fade-in zoom-in duration-500">
@@ -996,7 +1065,7 @@ const showToast = (message, type = "info") => {
                                                 <p className="text-sm text-slate-300 mb-3 leading-relaxed">Chào mừng trở lại, <span className="text-cyan-400 font-black">{playerName}</span>! 🎮</p>
                                                 <div className="bg-gradient-to-r from-green-500/20 to-cyan-500/20 border border-green-500/30 rounded-xl p-3">
                                                     <p className="text-sm text-slate-300 font-bold">📌 Giftcode Tân Thủ</p>
-                                                    <p className="text-lg font-black text-green-400 mt-1">NEWGAME</p>
+                                                    <p className="text-lg font-black text-green-400 mt-1">NEWBIE</p>
                                                     <p className="text-xs text-slate-400 mt-2">+500 xu cho người chơi mới</p>
                                                 </div>
                                             </div>
@@ -1014,7 +1083,7 @@ const showToast = (message, type = "info") => {
                                         <div className="backdrop-blur-xl border border-cyan-500/20 bg-gradient-to-br from-slate-900/40 to-slate-950/60 rounded-3xl p-6 shadow-2xl shadow-cyan-500/10 hover:shadow-cyan-500/20 transition-all duration-300">
                                             <div className="flex items-center gap-3 mb-6">
                                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center text-lg">🏆</div>
-                                                <h3 className="text-2xl font-black text-cyan-300 uppercase tracking-tight">Rank</h3>
+                                                <h3 className="text-2xl font-black text-cyan-300 uppercase tracking-tight">XẾP HẠNG</h3>
                                             </div>
 
                                             <div className="space-y-3">
@@ -1034,7 +1103,35 @@ const showToast = (message, type = "info") => {
                                                 ))}
                                             </div>
                                         </div>
+                                        
+<div className="backdrop-blur-md border border-cyan-500/30 bg-slate-900/40 rounded-[2rem] p-4 shadow-[0_0_20px_rgba(6,182,212,0.15)] hover:shadow-[0_0_30px_rgba(6,182,212,0.3)] transition-all duration-500 flex items-center justify-center group">
+    <button 
+        onClick={() => {
+            playSound("click", 0.5); 
+            // Đảm bảo lấy data mới nhất để không bị 0 tiền
+            const saved = SkinManager.loadSkinData(playerName);
+            const finalCoins = Math.max(totalCoins, saved?.coins || 0);
+            const finalSkins = (saved?.ownedSkins?.length > ownedSkins.length) ? saved.ownedSkins : ownedSkins;
+            
+            ShopUI.openShop(playerName, finalCoins, finalSkins, equippedSkinId);
+        }}
+        style={{
+            textShadow: '0 0 8px rgba(0,0,0,0.3)',
+            boxShadow: '0 4px 15px rgba(6, 182, 212, 0.4), inset 0 -2px 0 rgba(0,0,0,0.2)'
+        }}
+        className="relative overflow-hidden bg-cyan-500 text-slate-950 px-8 py-2.5 rounded-2xl font-black text-lg tracking-wider hover:bg-cyan-400 hover:scale-105 active:scale-95 transition-all duration-300 ease-out"
+    >
+        {/* Hiệu ứng ánh sáng quét qua nút khi hover group */}
+        <span className="absolute top-0 -left-full w-full h-full bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-[25deg] group-hover:left-[150%] transition-all duration-700 ease-in-out"></span>
+        
+        <span className="flex items-center gap-2">
+            <span className="text-xl">🛒</span> CỬA HÀNG 
+        </span>
+    </button>
+</div>
+
                                     </div>
+
 
                                     {/* CENTER PANEL - HERO (PERFECTLY CENTERED) */}
                                     <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '500px'}}>
@@ -1078,7 +1175,7 @@ const showToast = (message, type = "info") => {
                                                         </button>
                                                     </div>
                                                     <p className="text-[10px] text-slate-600 font-bold uppercase text-center pt-2">
-                                                        Thử: <span className="text-cyan-400">PIPEMASTER</span> • <span className="text-green-400">NEWGAME</span> • <span className="text-yellow-400">FREE800</span>
+                                                        Thử: <span className="text-cyan-400">PIPEMASTER</span> • <span className="text-green-400">NEWBIE</span> • <span className="text-yellow-400">FREECOINS</span>
                                                     </p>
                                                 </div>
                                             </div>
@@ -1261,6 +1358,7 @@ const showToast = (message, type = "info") => {
                                                         setIsMenuOpen(false);
                                                         setIsPlaying(false);
                                                     }}
+
                                                     className="menu-item"
                                                     >
                                                     <span>🚪</span> Thoát
@@ -1375,30 +1473,97 @@ const showToast = (message, type = "info") => {
                                                     )}
                                                 </div>
                                             ) : (
-                                                <svg viewBox="0 0 100 100" className="pipe-svg" style={{ transform: `rotate(${pipe.rotation * 90}deg)` }}>
-                                                    <g fill="none" className={pipe.active ? "pipe-active" : "pipe-inactive"}>
-                                                        {pipe.type === 'SOURCE' && <g><rect x="10" y="30" width="30" height="40" rx="4" fill="currentColor"/><path d="M40 50 L100 50" className={pipe.active ? "flowing" : ""}/></g>}
-                                                        {pipe.type === 'SINK' && (
-                                                            <g>
-                                                                <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="4" strokeDasharray="4 4" opacity="0.3"/>
-                                                                <path d="M0 50 L30 50" className={pipe.active ? "flowing" : ""}/>
-                                                                <g className={pipe.active ? "sink-valve-active text-cyan-400" : "text-slate-600"}>
-                                                                    <circle cx="50" cy="50" r="30" stroke="currentColor" strokeWidth="6"/>
-                                                                    <path d="M50 20 L50 80 M20 50 L80 50" stroke="currentColor" strokeWidth="4"/>
-                                                                    <circle cx="50" cy="50" r="8" fill="currentColor"/>
-                                                                    <circle cx="50" cy="20" r="4" fill="currentColor"/>
-                                                                    <circle cx="50" cy="80" r="4" fill="currentColor"/>
-                                                                    <circle cx="20" cy="50" r="4" fill="currentColor"/>
-                                                                    <circle cx="80" cy="50" r="4" fill="currentColor"/>
-                                                                </g>
-                                                            </g>
-                                                        )}
-                                                        {pipe.type === 'STRAIGHT' && <path d="M0 50 L100 50" className={pipe.active ? "flowing" : ""}/>}
-                                                        {pipe.type === 'ELBOW' && <path d="M50 100 Q50 50 100 50" className={pipe.active ? "flowing" : ""}/>}
-                                                        {pipe.type === 'TEE' && <g><path d="M0 50 L100 50"/><path d="M50 50 L50 100" className={pipe.active ? "flowing" : ""}/></g>}
-                                                        {pipe.type === 'CROSS' && <g><path d="M0 50 L100 50"/><path d="M50 0 L50 100" className={pipe.active ? "flowing" : ""}/></g>}
-                                                    </g>
-                                                </svg>
+<svg viewBox="0 0 100 100" className="pipe-svg" style={{ transform: `rotate(${pipe.rotation * 90}deg)` }}>
+    {/* 1. Sửa thẻ <g> bao ngoài: Dùng style thay cho className pipe-active */}
+    <g 
+        fill="none" 
+        style={{ 
+            stroke: pipe.active ? currentSkin.color : "#475569", 
+            filter: pipe.active ? `drop-shadow(0 0 8px ${currentSkin.glow})` : "none",
+            transition: "stroke 0.3s ease, filter 0.3s ease"
+        }}
+    >
+        {/* SOURCE */}
+        {pipe.type === 'SOURCE' && (
+            <g>
+                <path d="M40 50 L100 50" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/> 
+                <text 
+            x="50" 
+            y="50" 
+            fontSize="100" 
+            textAnchor="middle" 
+            dominantBaseline="middle"
+            style={{ pointerEvents: 'none', userSelect: 'none', opacity: 0.8 }}
+        >
+            🔳
+        </text>
+       <text 
+            x="50" 
+            y="50" 
+            fontSize="75" 
+            textAnchor="middle" 
+            dominantBaseline="middle"
+            /* - Luôn xoay: dùng class "source-valve-rotating" 
+               - Tâm xoay phải trùng với tọa độ x, y của icon (25px 50px)
+            */
+            className="source-valve-rotating"
+            style={{ 
+                pointerEvents: 'none', 
+                userSelect: 'none',
+                transformOrigin: '25px 50px', // Rất quan trọng để xoay đúng tâm icon
+                display: 'inline-block',
+                filter: pipe.active ? `drop-shadow(0 0 8px currentColor)` : 'none',
+                transition: 'filter 0.3s'
+            }}
+        >🛟</text>
+            </g>
+        )}
+
+        {/* SINK (Điểm đích) */}
+        {pipe.type === 'SINK' && (
+            <g>
+                <circle cx="50" cy="50" r="42" stroke="currentColor" strokeWidth="4" strokeDasharray="4 4" opacity="0.3"/>
+                <path d="M0 50 L30 50" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/>
+                {/* Van xả: Tự động lấy màu Skin khi active */}
+                <g style={{ color: pipe.active ? currentSkin.color : "#475569" }}>
+                    <circle cx="50" cy="50" r="30" stroke="currentColor" strokeWidth="6"/>
+                    <path d="M50 20 L50 80 M20 50 L80 50" stroke="currentColor" strokeWidth="4"/>
+                    <circle cx="50" cy="50" r="8" fill="currentColor"/>
+                    <circle cx="50" cy="20" r="4" fill="currentColor"/>
+                    <circle cx="50" cy="80" r="4" fill="currentColor"/>
+                    <circle cx="20" cy="50" r="4" fill="currentColor"/>
+                    <circle cx="80" cy="50" r="4" fill="currentColor"/>
+                </g>
+            </g>
+        )}
+
+        {/* STRAIGHT */}
+        {pipe.type === 'STRAIGHT' && (
+            <path d="M0 50 L100 50" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/>
+        )}
+
+        {/* ELBOW */}
+        {pipe.type === 'ELBOW' && (
+            <path d="M50 100 Q50 50 100 50" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/>
+        )}
+
+        {/* TEE */}
+        {pipe.type === 'TEE' && (
+            <g>
+                <path d="M0 50 L100 50" strokeWidth="28" strokeLinecap="round"/>
+                <path d="M50 50 L50 100" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/>
+            </g>
+        )}
+
+        {/* CROSS */}
+        {pipe.type === 'CROSS' && (
+            <g>
+                <path d="M0 50 L100 50" strokeWidth="28" strokeLinecap="round"/>
+                <path d="M50 0 L50 100" className={pipe.active ? "flowing" : ""} strokeWidth="28" strokeLinecap="round"/>
+            </g>
+        )}
+    </g>
+</svg>
                                             )}
                                         </div>
                                     )))}
@@ -1487,5 +1652,6 @@ THỬ LẠI MÀN MỚI
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
+<script src="script.js"></script>
 </body>
 </html>
