@@ -236,9 +236,9 @@
 
                 if (!lastResetDaily || (now - parseInt(lastResetDaily)) > oneDay) {
                     daily = [
-                        { id: "d1", title: "Chơi 1 trận", progress: 0, target: 1, reward: 50, claimed: false },
-                        { id: "d2", title: "Thu thập 500 xu", progress: 0, target: 500, reward: 100, claimed: false },
-                        { id: "d3", title: "Sử dụng Giftcode", progress: 0, target: 1, reward: 75, claimed: false }
+                        { id: "d1", title: "Chơi 1 trận", progress: 0, target: 1, reward: 500, claimed: false },
+                        { id: "d2", title: "Thu thập 5000 xu", progress: 0, target: 5000, reward: 1000, claimed: false },
+                        { id: "d3", title: "Sử dụng Giftcode", progress: 0, target: 1, reward: 800, claimed: false }
                     ];
                     localStorage.setItem(`missions_daily_${playerName}`, JSON.stringify(daily));
                     localStorage.setItem(`last_reset_daily_${playerName}`, now.toString());
@@ -246,8 +246,9 @@
 
                 if (!lastResetWeekly || (now - parseInt(lastResetWeekly)) > oneWeek) {
                     weekly = [
-                        { id: "w1", title: "Thắng 3 trận", progress: 0, target: 3, reward: 300, claimed: false },
-                        { id: "w2", title: "Thu thập 3000 xu", progress: 0, target: 3000, reward: 500, claimed: false }
+                        { id: "w1", title: "Thắng 10 trận", progress: 0, target: 10, reward: 300, claimed: false },
+                        { id: "w2", title: "Thu thập 30000 xu", progress: 0, target: 30000, reward: 1500, claimed: false },
+                        { id: "w3", title: "Nhập 3 Giftcode", progress: 0, target: 3, reward: 4000, claimed: false }
                     ];
                     localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(weekly));
                     localStorage.setItem(`last_reset_weekly_${playerName}`, now.toString());
@@ -585,8 +586,10 @@
                     showToast(gift.msg, "success");
 
                     // UPDATE MISSIONS
-                    updateMissionProgress("d3", 1, false); // Sử dụng Giftcode
-                } else {
+                    updateMissionProgress("d3", 1, false);
+                    updateMissionProgress("w3", 1, true); // Sử dụng Giftcode
+                }
+                 else {
                     showToast("Mã Giftcode không hợp lệ!", "error");
                 }
             };
