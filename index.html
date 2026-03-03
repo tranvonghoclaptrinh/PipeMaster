@@ -246,8 +246,9 @@
 
                 if (!lastResetWeekly || (now - parseInt(lastResetWeekly)) > oneWeek) {
                     weekly = [
-                        { id: "w1", title: "Thắng 3 trận", progress: 0, target: 3, reward: 300, claimed: false },
-                        { id: "w2", title: "Thu thập 3000 xu", progress: 0, target: 3000, reward: 500, claimed: false }
+                        { id: "w1", title: "Thắng 10 trận", progress: 0, target: 10, reward: 1300, claimed: false },
+                        { id: "w2", title: "Thu thập 30000 xu", progress: 0, target: 30000, reward: 1000, claimed: false }
+                        { id: "w3", title: "Phá 1000 vật cản", progress: 0, target: 1000, reward: 1000, claimed: false}
                     ];
                     localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(weekly));
                     localStorage.setItem(`last_reset_weekly_${playerName}`, now.toString());
