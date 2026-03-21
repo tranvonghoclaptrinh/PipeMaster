@@ -40,6 +40,7 @@
 
         window.exportGameState = exportGameState;
         const getSaveKey = (playerName) => `pipe_master_save_${playerName}`;
+        const getWinCountKey = (playerName) => `pipe_master_wins_${playerName}`;
 // ===== AUDIO SYSTEM =====
         const AUDIO = {
             rotate: new Audio("audio/xoayong.mp3"),
@@ -172,6 +173,7 @@
             const [usedCodes, setUsedCodes] = useState([]);
             const [hasSaved, setHasSaved] = useState(false);
             const [tutorialRock, setTutorialRock] = React.useState(null);
+            const [winCount, setWinCount] = useState(0);
 
             const [isAIVisible, setIsAIVisible] = useState(false);
 
@@ -194,9 +196,23 @@
             const [showShop, setShowShop] = useState(false);
             const currentSkin = FLOW_SKINS[equippedSkinId] || FLOW_SKINS.default;
             const toggleAI = () => {
-                setIsAIVisible(prev => !prev);
-                if (window.toggleAI) window.toggleAI();
+                if (!window.toggleAI) return;
+                const running = window.toggleAI();
+                setIsAIVisible(!!running);
             };
+            const resetAIState = (hidePanel = true) => {
+                if (window.resetPipeAI) window.resetPipeAI();
+                setAiLogs([]);
+                if (hidePanel) setIsAIVisible(false);
+            };
+            useEffect(() => {
+                if (!playerName) {
+                    setWinCount(0);
+                    return;
+                }
+                const savedWins = parseInt(localStorage.getItem(getWinCountKey(playerName)) || "0", 10);
+                setWinCount(Number.isNaN(savedWins) ? 0 : savedWins);
+            }, [playerName]);
 
             // MAIL SYSTEM
             const loadMails = () => {
@@ -236,9 +252,9 @@
 
                 if (!lastResetDaily || (now - parseInt(lastResetDaily)) > oneDay) {
                     daily = [
-                        { id: "d1", title: "Chơi 1 trận", progress: 0, target: 1, reward: 500, claimed: false },
-                        { id: "d2", title: "Thu thập 5000 xu", progress: 0, target: 5000, reward: 1000, claimed: false },
-                        { id: "d3", title: "Sử dụng Giftcode", progress: 0, target: 1, reward: 800, claimed: false }
+                        { id: "d1", title: "Chơi 1 trận", progress: 0, target: 1, reward: 50, claimed: false },
+                        { id: "d2", title: "Thu thập 500 xu", progress: 0, target: 500, reward: 100, claimed: false },
+                        { id: "d3", title: "Sử dụng Giftcode", progress: 0, target: 1, reward: 75, claimed: false }
                     ];
                     localStorage.setItem(`missions_daily_${playerName}`, JSON.stringify(daily));
                     localStorage.setItem(`last_reset_daily_${playerName}`, now.toString());
@@ -246,9 +262,8 @@
 
                 if (!lastResetWeekly || (now - parseInt(lastResetWeekly)) > oneWeek) {
                     weekly = [
-                        { id: "w1", title: "Thắng 10 trận", progress: 0, target: 10, reward: 300, claimed: false },
-                        { id: "w2", title: "Thu thập 30000 xu", progress: 0, target: 30000, reward: 1500, claimed: false },
-                        { id: "w3", title: "Nhập 3 Giftcode", progress: 0, target: 3, reward: 4000, claimed: false }
+                        { id: "w1", title: "Thắng 3 trận", progress: 0, target: 3, reward: 300, claimed: false },
+                        { id: "w2", title: "Thu thập 3000 xu", progress: 0, target: 3000, reward: 500, claimed: false }
                     ];
                     localStorage.setItem(`missions_weekly_${playerName}`, JSON.stringify(weekly));
                     localStorage.setItem(`last_reset_weekly_${playerName}`, now.toString());
@@ -300,9 +315,9 @@
             // LEADERBOARD SYSTEM
             const loadLeaderboard = () => {
                 let fakeLeaderboard = [
-                    { rank: 1, name: "Anh thợ may mắn", coins: 40000, medal: "🥇" },
-                    { rank: 2, name: "Nàng Thơ nặng", coins: 35000, medal: "🥈" },
-                    { rank: 3, name: "Chú Tư", coins: 32000, medal: "🥉" }
+                    { rank: 1, name: "Alex", coins: 40000, medal: "🥇" },
+                    { rank: 2, name: "John", coins: 35000, medal: "🥈" },
+                    { rank: 3, name: "Lina", coins: 32000, medal: "🥉" }
                 ];
 
                 // Kiểm tra nếu người chơi hiện tại có nhiều coins hơn rank #3
@@ -410,42 +425,71 @@
             }, [isLoggedIn, isPlaying, totalCoins]);
 
             const [aiLogs, setAiLogs] = useState([]); // State để lưu log hiển thị bên phải
+            const gameGridRef = useRef(gameGrid);
+            const sessionCoinsRef = useRef(sessionCoins);
+            const shovelCountRef = useRef(shovelCount);
 
-            // initialize solver once and keep reference to latest state
             useEffect(() => {
+                gameGridRef.current = gameGrid;
+                sessionCoinsRef.current = sessionCoins;
+                shovelCountRef.current = shovelCount;
+            }, [gameGrid, sessionCoins, shovelCount]);
+
+            const createAIInstance = () => {
                 window.initPipeAI({
                     getState: () => ({
-                        grid: gameGrid,
-                        coins: sessionCoins,
-                        shovels: shovelCount,
+                        grid: gameGridRef.current,
+                        coins: sessionCoinsRef.current,
+                        shovels: shovelCountRef.current,
                         shovelCost: SHOVEL_PRICE
                     }),
                     actions: {
                         rotate: (r,c,rot) => {
-                            const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                            const newGrid = JSON.parse(JSON.stringify(gameGridRef.current));
                             newGrid[r][c].rotation = rot;
-                            updateFlow(newGrid, sessionCoins, shovelCount);
+                            updateFlow(newGrid, sessionCoinsRef.current, shovelCountRef.current);
                             setGameGrid(newGrid);
                         },
                         destroy: (r,c) => {
-                            const newGrid = JSON.parse(JSON.stringify(gameGrid));
+                            const newGrid = JSON.parse(JSON.stringify(gameGridRef.current));
                             newGrid[r][c].type = getRandomPipe();
-                            setShovelCount(shovelCount - 1);
-                            updateFlow(newGrid, sessionCoins, shovelCount - 1);
+                            setShovelCount(shovelCountRef.current - 1);
+                            updateFlow(newGrid, sessionCoinsRef.current, shovelCountRef.current - 1);
                             setGameGrid(newGrid);
                         },
                         buy: () => {
-                            if (sessionCoins >= SHOVEL_PRICE) {
-                                setSessionCoins(sessionCoins - SHOVEL_PRICE);
-                                setShovelCount(shovelCount + 1);
+                            if (sessionCoinsRef.current >= SHOVEL_PRICE) {
+                                setSessionCoins(sessionCoinsRef.current - SHOVEL_PRICE);
+                                setShovelCount(shovelCountRef.current + 1);
                             }
+                        },
+                        hint: () => {
+                            handleFlushHint();
                         }
                     },
                     logger: (msg) => {
                         setAiLogs(prev => [...prev, {time: new Date().toLocaleTimeString(), text: msg}]);
                     }
                 });
+            };
+
+            // initialize solver once and keep reference to latest state
+            useEffect(() => {
+                createAIInstance();
             }, []);
+            useEffect(() => {
+                if (!isPlaying) {
+                    resetAIState(true);
+                }
+            }, [isPlaying]);
+            useEffect(() => {
+                if (!isPlaying) return;
+                const timer = setInterval(() => {
+                    const running = window.isPipeAIRunning ? window.isPipeAIRunning() : false;
+                    setIsAIVisible(running);
+                }, 250);
+                return () => clearInterval(timer);
+            }, [isPlaying]);
             useEffect(() => {
 
                 // giữ class body như bạn đang dùng
@@ -586,10 +630,8 @@
                     showToast(gift.msg, "success");
 
                     // UPDATE MISSIONS
-                    updateMissionProgress("d3", 1, false);
-                    updateMissionProgress("w3", 1, true); // Sử dụng Giftcode
-                }
-                 else {
+                    updateMissionProgress("d3", 1, false); // Sử dụng Giftcode
+                } else {
                     showToast("Mã Giftcode không hợp lệ!", "error");
                 }
             };
@@ -645,26 +687,39 @@
             };
 
             const handleFlushHint = () => {
-                if (sessionCoins < 50) {
+                const currentCoins = sessionCoinsRef?.current ?? sessionCoins;
+                const currentGrid = JSON.parse(JSON.stringify(gameGridRef?.current ?? gameGrid));
+                const currentShovels = shovelCountRef?.current ?? shovelCount;
+
+                if (currentCoins < 50) {
+                    console.trace("COIN ERROR TRIGGERED", {
+                        action: "handleFlushHint",
+                        currentCoins,
+                        requiredCoins: 50
+                    });
                     showToast("Cần ít nhất 50 xu!", "error");
                     return;
                 }
 
-                let newGrid = JSON.parse(JSON.stringify(gameGrid));
+                let newGrid = currentGrid;
                 let highlightTargets = [];
                 let spent = 0;
                 let msg = "";
 
-                if (sessionCoins >= 1000) {
-                    msg = "KÍCH HOẠT: Auto-Win Tuyến Chính!";
-                    const path = findPathAStar(newGrid, true);
-                    if(path) {
-                        path.forEach(p => {
-                            if(newGrid[p.r][p.c].type === 'DIRT') newGrid[p.r][p.c].type = 'STRAIGHT';
-                        });
+                if (currentCoins >= 1000) {
+                    msg = "KÍCH HOẠT: AUTO-WIN TOÀN BẢN ĐỒ!";
+                    for (let r = 0; r < GRID_SIZE; r++) {
+                        for (let c = 0; c < GRID_SIZE; c++) {
+                            highlightTargets.push({r, c});
+                            if (newGrid[r][c].type === 'DIRT') {
+                                newGrid[r][c].type = getRandomPipe();
+                                newGrid[r][c].rotation = Math.floor(Math.random() * 4);
+                            }
+                        }
                     }
-                    spent = Math.min(sessionCoins, 1400);
-                } else if (sessionCoins >= 700) {
+                    triggerHighlight(highlightTargets);
+                    spent = currentCoins;
+                } else if (currentCoins >= 700) {
                     msg = "KÍCH HOẠT: Phá hủy vùng 7x7 góc Sink!";
                     const startR = GRID_SIZE - 7;
                     const startC = GRID_SIZE - 7;
@@ -677,8 +732,8 @@
                         }
                     }
                     triggerHighlight(highlightTargets);
-                    spent = sessionCoins;
-                } else if (sessionCoins >= 400) {
+                    spent = currentCoins;
+                } else if (currentCoins >= 400) {
                     msg = "KÍCH HOẠT: Dọn vùng 5x10 tiềm năng!";
                     let bestRegion = {r: 0, c: 0, count: -1};
                     for(let r=0; r<=GRID_SIZE-5; r++) {
@@ -695,8 +750,8 @@
                         }
                     }
                     triggerHighlight(highlightTargets);
-                    spent = sessionCoins;
-                } else if (sessionCoins >= 200) {
+                    spent = currentCoins;
+                } else if (currentCoins >= 200) {
                     msg = "KÍCH HOẠT: Phá 3 ô đá gần nước nhất!";
                     const activeCells = [];
                     newGrid.forEach(row => row.forEach(c => { if(c.active) activeCells.push(c); }));
@@ -712,7 +767,7 @@
                         newGrid[t.r][t.c].type = getRandomPipe();
                     });
                     triggerHighlight(highlightTargets);
-                    spent = sessionCoins;
+                    spent = currentCoins;
                 } else {
                     msg = "KÍCH HOẠT: Phá 1 ô đá gần nước!";
                     const activeCells = [];
@@ -731,13 +786,13 @@
                         newGrid[best.r][best.c].type = getRandomPipe();
                         triggerHighlight(highlightTargets);
                     }
-                    spent = sessionCoins;
+                    spent = currentCoins;
                 }
 
-                const finalCoins = sessionCoins - spent;
+                const finalCoins = currentCoins - spent;
                 setSessionCoins(finalCoins);
                 setGameGrid(newGrid);
-                updateFlow(newGrid, finalCoins, shovelCount);
+                updateFlow(newGrid, finalCoins, currentShovels);
                 showToast(msg, "success");
                 playHintBreak();
                 setIsShopOpen(false);
@@ -756,6 +811,9 @@
             };
 
 const generatePuzzle = (keepCoins = false) => {
+    resetAIState(true);
+    createAIInstance();
+
     // 1. Reset trạng thái lưu và lấy dữ liệu Skin mới nhất
     setHasSaved(false);
     
@@ -782,8 +840,9 @@ const generatePuzzle = (keepCoins = false) => {
     grid[size-1][size-1].type = 'SINK'; 
     grid[size-1][size-1].isFixed = true;
     
-    // 4. Đặt vật cản (Đất)
-    const dirtCount = Math.floor(size * size * 0.38); 
+    // 4. Đặt vật cản (Đất) tăng dần theo số màn thắng
+    const rockRatio = Math.min(0.25, 0.10 + (winCount * 0.02));
+    const dirtCount = Math.floor(size * size * rockRatio); 
     let placedDirt = 0;
     while(placedDirt < dirtCount) {
         const r = Math.floor(Math.random() * size);
@@ -871,6 +930,7 @@ const generatePuzzle = (keepCoins = false) => {
                 setGameGrid([...grid]);
                 
                 if (reachedSink) {
+                    resetAIState(true);
                     playCompleteThenWin();
                     
                     setTimeout(() => setIsWon(true), 2100);
@@ -940,11 +1000,14 @@ const generatePuzzle = (keepCoins = false) => {
                 showToast("Đã lưu trận đấu thành công!", "success");
 
                 setIsMenuOpen(false);
+                resetAIState(true);
 
                 setIsPlaying(false);
             };
             const loadGame = () => {
 
+                resetAIState(true);
+                createAIInstance();
                 const raw = localStorage.getItem(getSaveKey(playerName));
 
                 if (!raw) return false;
@@ -958,6 +1021,7 @@ const generatePuzzle = (keepCoins = false) => {
                     setShovelCount(data.shovels);
                     setHasSaved(false);
                     setIsPlaying(true);
+                    setIsMenuOpen(false);
 
                     return true;
 
@@ -1358,6 +1422,7 @@ const generatePuzzle = (keepCoins = false) => {
                                                         }
 
                                                         // đóng menu và về màn hình chính
+                                                        resetAIState(true);
                                                         setIsMenuOpen(false);
                                                         setIsPlaying(false);
                                                     }}
@@ -1592,6 +1657,9 @@ const generatePuzzle = (keepCoins = false) => {
                                         // cộng coin vào tài khoản chính
                                         const reward = sessionCoins + WIN_BONUS;
                                         setTotalCoins(prev => prev + reward);
+                                        const nextWinCount = winCount + 1;
+                                        setWinCount(nextWinCount);
+                                        localStorage.setItem(getWinCountKey(playerName), String(nextWinCount));
 
                                         // UPDATE MISSIONS
                                         updateMissionProgress("d1", 1, false); // Chơi 1 trận
@@ -1600,6 +1668,7 @@ const generatePuzzle = (keepCoins = false) => {
                                         updateMissionProgress("w2", reward, true);  // Thu thập 3000 xu
 
                                         // reset trạng thái
+                                        resetAIState(true);
                                         setSessionCoins(0);
                                         setIsWon(false);
                                         setIsLost(false);
@@ -1634,6 +1703,7 @@ onClick={() => {
     localStorage.removeItem(getSaveKey(playerName));
 
     // reset trạng thái
+    resetAIState(true);
     setIsLost(false);
     setIsWon(false);
 

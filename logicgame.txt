@@ -1,0 +1,45 @@
+TÀI LIỆU HỆ THỐNG AI CHO GAME PIPE PUZZLE
+GIỚI THIỆU
+Hệ thống AI này được xây dựng cho một trò chơi giải đố ống nước dạng lưới, trong đó mục tiêu chính là kết nối nguồn nước từ điểm bắt đầu (SOURCE) đến điểm thoát nước (SINK). Môi trường game bao gồm các ống có thể xoay, các ô bị chặn (đá) đóng vai trò vật cản, các đồng xu có thể thu thập, xẻng có thể mua, và một hệ thống gợi ý (hint) có khả năng tác động trực tiếp lên bản đồ trong những điều kiện tài nguyên cụ thể.
+AI có nhiệm vụ tự động giải bản đồ trong khi phải cân bằng nhiều mục tiêu khác nhau. Nó phải mở rộng mạng lưới nước, xác định các phép xoay ống có ích, đánh giá việc phá đá, và quản lý tài nguyên để tránh các hành vi lặp vô ích. Hệ thống này hoạt động như một tác tử chiến thuật (tactical agent) trong thời gian thực thay vì tìm kiếm vét cạn (brute-force).
+KIẾN TRÚC AI
+AI hoạt động theo mô hình từng bước (step-based). Tại mỗi chu kỳ, nó quan sát trạng thái lưới, tính toán vùng dòng chảy, đánh giá các cơ hội tại biên giới (frontier) và chọn một hành động tối ưu.
+Kiến trúc chia làm ba lớp chính:
+Lớp phân tích không gian cục bộ: Điều khiển bởi BFS để xác định vùng có thể tiếp cận (reachable) và biên giới hành động (frontier).
+Lớp lập kế hoạch đường đi: Điều khiển bởi A* để ước lượng lộ trình rẻ nhất đi xuyên qua các vật cản đá.
+Lớp ra quyết định dựa trên Heuristic: Xếp hạng các hành động như khám phá, thu thập coin, mua xẻng hoặc phá đá dựa trên ưu tiên thiết kế sẵn.
+THUẬT TOÁN CHÍNH
+3.1 Breadth-First Search (BFS)
+BFS là cơ chế nhận thức không gian chính của AI. Nó xác định:
+Reachable set: Tập hợp các ô hiện đang kết nối hợp lệ với nguồn nước.
+Frontier: Biên giới quanh vùng reachable, nơi các phép xoay ống hoặc phá đá có thể mở rộng mạng lưới.
+3.2 A* Search
+Được sử dụng khi cần một lộ trình dài hạn đến đích. A* coi các ô đá là có thể đi qua với một chi phí phạt nặng, giúp AI tính toán xem cần bao nhiêu xẻng và lộ trình nào là tối ưu nhất để tiếp cận SINK.
+3.3 Chiến lược Mở rộng (Expansion Score)
+AI ưu tiên các hành động có expandScore cao:
+expandScore = (kích thước reachable mới) - (kích thước reachable hiện tại)
+HỆ THỐNG ƯU TIÊN HÀNH ĐỘNG
+Thứ tự ưu tiên được thiết kế để giảm lãng phí tài nguyên:
+EXPLORE: Xoay ống tại frontier để tăng diện tích bao phủ (miễn phí).
+PATH TO SINK: Ưu tiên các nước đi hoàn thiện đường dẫn khi đã gần đích.
+BREAK ROCK: Phá ô đá chiến lược nằm trên lộ trình A* nếu có xẻng.
+BUY SHOVEL: Mua xẻng nếu cần thiết và đủ coin.
+COIN ZONE: Thu thập coin nếu việc khám phá chính bị bế tắc.
+RESOURCE MODE: Tiết kiệm tài nguyên khi dự đoán chi phí phá đá vượt quá khả năng chi trả.
+HINT: Giải pháp cuối cùng khi bị kẹt hoàn toàn.
+CÁC CHẾ ĐỘ HOẠT ĐỘNG
+NORMAL: Chế độ mặc định, tập trung khám phá và mở rộng bản đồ hiệu quả.
+RESOURCE MODE: Kích hoạt khi thiếu hụt xẻng, AI sẽ ưu tiên các phương án chi phí thấp.
+SINK_FOCUS: Kích hoạt khi dòng nước tiến sát đích. AI sẽ bỏ qua các mục tiêu phụ để dứt điểm màn chơi.
+ESCAPE: Chế độ chống kẹt, thay đổi chiến lược khi phát hiện các vòng lặp vô tận.
+CƠ CHẾ CHỐNG LẶP (ANTI-LOOP)
+Rotation count: Theo dõi số lần xoay của từng ô để tránh xoay đi xoay lại vô ích.
+Move history: Lưu lại lịch sử nước đi gần nhất để phát hiện các mẫu lặp lại.
+Stuck counter: Tăng dần khi không có sự tiến triển diện tích reachable, kích hoạt các thay đổi chiến lược mạnh hơn.
+QUẢN LÝ TÀI NGUYÊN
+Hệ thống đánh giá tính khả thi dựa trên:
+rockNeeded: Số đá cần phá trên lộ trình tốt nhất.
+maxShovel: Tổng số xẻng hiện có cộng với số lượng có thể mua được từ coin.
+Nếu rockNeeded > maxShovel, AI sẽ chuyển sang trạng thái tích lũy thay vì tấn công trực diện.
+KẾT LUẬN
+AI cho Pipe Puzzle là một hệ thống thống nhất giữa tìm đường (pathfinding), lập kế hoạch vật cản (obstacle planning) và tối ưu hóa tài nguyên. Đây là một giải pháp game engineering thực dụng, kết hợp giữa các thuật toán tìm kiếm cổ điển và các logic điều khiển hiện đại để tạo ra hành vi tự động thông minh và ổn định.
