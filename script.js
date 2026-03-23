@@ -20,7 +20,7 @@ const FLOW_SKINS = {
   void:    { id: "void",    name: "Hư Không",       icon: "🌌", color: "#1e022e", glow: "#7c3aed", price: 20000 },
   ocean:   { id: "ocean",   name: "Biển Sâu",       icon: "🌊", color: "#1c3a8d", glow: "#1e3a8a", price: 22000 },
   frozen:  { id: "frozen",  name: "Băng Tuyết",     icon: "❄️", color: "#b1d0e4", glow: "#e0f2fe", price: 24000 },
-  neon:    { id: "uv",    name: "Tia cực tím",     icon: "⚡", color: "#ff00eafa", glow: "#2dd4bf", price: 26000 },
+  neon:    { id: "neon",    name: "Tia cực tím",     icon: "⚡", color: "#fff870", glow: "#fff870", price: 26000 },
   silver:  { id: "silver",  name: "Bạch Kim",       icon: "🥈", color: "#bee6e4", glow: "#94a3b8", price: 28000 },
   gold:    { id: "gold",    name: "Vàng Ròng",      icon: "🥇", color: "#fff700", glow: "#fbbf24", price: 30000 }
 };
@@ -375,7 +375,31 @@ class PipeAI {
 
         this.running = false;
         this.timer = null;
+        this.resetRuntimeState();
 
+    }
+
+    resetRuntimeState(){
+        this.lastMove = null;
+        this.repeatCount = 0;
+        this.rotationMap = new Map();
+        this.lastMoves = [];
+        this.stuckCount = 0;
+        this.mode = "NORMAL";
+        this.noProgressSteps = 0;
+        this.loopCount = 0;
+        this.lastBestDistance = 999999;
+        this.lastFlowSize = 0;
+        this.sinkLockActive = false;
+        this.sinkLockRadius = 7;
+        this.sinkZoneAttempts = 0;
+        this.sinkZoneRotationAttempts = new Map();
+        this.lastSinkZoneStrategy = null;
+        this.aiTick = 0;
+        this.lastHintTick = -999;
+        this.hintCooldownTicks = 8;
+        this.postHintZone = null;
+        this.postHintCoins = [];
     }
 
     /* ========================= */
@@ -412,12 +436,7 @@ class PipeAI {
     reset(){
 
         this.stop();
-        this.lastMove = null;
-        this.repeatCount = 0;
-        this.rotationMap = new Map();
-        this.lastMoves = [];
-        this.stuckCount = 0;
-        this.mode = "NORMAL";
+        this.resetRuntimeState();
 
     }
 
@@ -443,18 +462,46 @@ class PipeAI {
         if(!this.rotationMap) this.rotationMap = new Map();
         if(!this.lastMoves) this.lastMoves = [];
         if(this.stuckCount===undefined) this.stuckCount = 0;
+        if(this.noProgressSteps===undefined) this.noProgressSteps = 0;
+        if(this.loopCount===undefined) this.loopCount = 0;
+        if(this.lastBestDistance===undefined) this.lastBestDistance = 999999;
+        if(this.lastFlowSize===undefined) this.lastFlowSize = 0;
+        if(this.sinkLockActive===undefined) this.sinkLockActive = false;
+        if(this.sinkLockRadius===undefined) this.sinkLockRadius = 7;
+        if(this.sinkZoneAttempts===undefined) this.sinkZoneAttempts = 0;
+        if(!this.sinkZoneRotationAttempts) this.sinkZoneRotationAttempts = new Map();
+        if(this.lastSinkZoneStrategy===undefined) this.lastSinkZoneStrategy = null;
+        if(this.aiTick===undefined) this.aiTick = 0;
+        if(this.lastHintTick===undefined) this.lastHintTick = -999;
+        if(this.hintCooldownTicks===undefined) this.hintCooldownTicks = 8;
         if(!this.mode) this.mode = "NORMAL";
+        this.aiTick++;
 
         const state = this.getState();
         if(!state) return;
 
         const source = this.find(state.grid,"SOURCE");
-        const sink   = this.find(state.grid,"SINK");
+        const sink = this.find(state.grid,"SINK");
         if(!source || !sink) return;
 
+        const sinkEntry = this.getSinkEntry(state.grid, sink);
         const flow = this.bfs(state.grid,source);
         const connected = flow.visited;
         const frontier = flow.frontier;
+        const distanceToSink = this.distanceSet(connected,sink);
+        const distanceToEntry = this.distanceSet(connected,sinkEntry);
+        const terminalAware = distanceToEntry <= 2 || distanceToSink <= 2;
+        const nearSink = distanceToEntry <= 4 || distanceToSink <= 3;
+        const inSinkZone = distanceToSink <= 7;
+        const hintCoins = this.getRemainingHintCoins(state.grid, connected);
+        const recoveringHint = hintCoins.length > 0;
+        const hintTarget = recoveringHint
+            ? this.pickBestHintCoinTarget(hintCoins, connected, sinkEntry)
+            : null;
+        const sinkEntryCell = state.grid[sinkEntry.r]?.[sinkEntry.c];
+        const sinkEntryBlocked = String(sinkEntryCell?.type || "").toUpperCase() === "DIRT";
+
+        this.updateProgress(distanceToEntry, connected.size);
 
         if(this.has(connected,sink)){
             this.mode = "NORMAL";
@@ -465,199 +512,306 @@ class PipeAI {
             return;
         }
 
-        if(!frontier.length){
-            this.logger("NO FRONTIER");
+        const sinkZoneContext = inSinkZone
+            ? this.buildSinkZoneContext(state.grid, connected, frontier, sink)
+            : null;
+
+        if(terminalAware){
+            this.activateSinkLock(2);
+        }else if(nearSink){
+            this.activateSinkLock(3);
+        }
+
+        const forcedMove = this.findForcedCompletion(
+            state,
+            source,
+            sink,
+            this.sinkLockActive ? this.sinkLockRadius : 2
+        );
+        if(forcedMove){
+            this.mode = "FORCED_FINISH";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeRotate(forcedMove, connected.size);
             return;
         }
 
-        let target = sink;
-        let plan = null;
-        const isNearSink = (r, c) =>
-            Math.abs(r - sink.r) + Math.abs(c - sink.c) <= 3;
-        const sinkFocus =
-            [...connected].some(k => {
-                const [r,c] = k.split(",").map(Number);
-                return isNearSink(r,c);
-            }) ||
-            frontier.some(p => isNearSink(p.r,p.c));
-        const sinkPlan =
-            this.findBestRock(state,connected,frontier,sink);
-        const maxShovel =
-            state.shovels + Math.floor(state.coins / state.shovelCost);
-        const recent = this.lastMoves || [];
-        const patternLoop =
-            recent.length>=4 &&
-            recent[recent.length-1]===recent[recent.length-3] &&
-            recent[recent.length-2]===recent[recent.length-4] &&
-            recent[recent.length-1]!==recent[recent.length-2];
-
-        const rotateMove =
-            this.findBestRotation(state,connected,frontier,target,sinkFocus);
-
-        if(sinkFocus){
-            this.mode = "SINK_FOCUS";
+        if(sinkEntryBlocked){
+            this.mode = "SINK_ENTRY";
             this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            if(state.shovels > 0){
+                this.executeDestroy(sinkEntry);
+                return;
+            }
+            if(state.coins >= state.shovelCost){
+                this.executeBuy();
+                return;
+            }
+            const sinkZoneRockPressure = this.countZoneRocks(state.grid, sink, 7);
+            if(inSinkZone && sinkZoneRockPressure >= 3 && this.canUseHint(state, { inSinkZone:true })){
+                this.mode = "SINK_ENTRY_HINT";
+                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+                this.executeHint(state, connected, sink);
+                return;
+            }
+        }
 
-            if(sinkPlan && sinkPlan.rock){
-                const rock = sinkPlan.rock;
+        const patternLoop = this.isPatternLoop();
+        const maxShovel = state.shovels + Math.floor(state.coins / Math.max(1, state.shovelCost || 1));
+        const zoneOptions = this.sinkLockActive
+            ? { restrictToZone:true, zoneRadius:this.sinkLockRadius }
+            : {};
+        const emergencyCoinTarget =
+            sinkEntryBlocked && state.coins < state.shovelCost
+                ? this.findNearestReachableCoin(state.grid, connected, sinkEntry)
+                : null;
+        const target = recoveringHint ? hintTarget : emergencyCoinTarget || sinkEntry;
+        const sinkStatePlan = inSinkZone
+            ? this.searchSinkZoneStateSpace(state, sinkZoneContext)
+            : null;
 
-                if(state.shovels>0){
-                    this.lastMove={type:"DESTROY",r:rock.r,c:rock.c};
-                    this.repeatCount=0;
-                    this.stuckCount=0;
-                    this.logger(`DESTROY (${rock.r},${rock.c})`);
-                    this.actions.destroy(rock.r,rock.c);
+        if(sinkStatePlan){
+            this.mode = "SINK_STATE_SEARCH";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels} COST=${sinkStatePlan.cost}`);
+            if(sinkStatePlan.type==="ROTATE"){
+                this.executeRotate({
+                    r:sinkStatePlan.r,
+                    c:sinkStatePlan.c,
+                    rot:sinkStatePlan.rot,
+                    expand:connected.size + 1,
+                    score:sinkStatePlan.score,
+                    zoneMode:"STATE_SEARCH"
+                }, connected.size);
+                return;
+            }
+            if(sinkStatePlan.type==="DESTROY"){
+                if(state.shovels > 0){
+                    this.executeDestroy({r:sinkStatePlan.r, c:sinkStatePlan.c});
                     return;
                 }
-
-                if(state.coins>=state.shovelCost){
-                    this.lastMove={type:"BUY"};
-                    this.repeatCount=0;
-                    this.stuckCount=0;
-                    this.logger(`BUY_SHOVEL`);
-                    this.actions.buy();
+                if(state.coins >= state.shovelCost){
+                    this.executeBuy();
                     return;
                 }
             }
         }
+
+        let rotateMove = inSinkZone
+            ? this.findSinkZoneRotation(state, connected, sinkZoneContext)
+            : this.findBestRotation(
+                state,
+                connected,
+                frontier,
+                target,
+                {
+                    sink,
+                    sinkEntry,
+                    nearSink,
+                    inSinkZone,
+                    terminalAware,
+                    recoveringHint,
+                    blockSinkZoneBeforeEntry: !inSinkZone,
+                    ...zoneOptions
+                }
+            );
+
+        let plan = this.findBestRock(
+            state,
+            connected,
+            frontier,
+            sink,
+            {
+                goal:sinkEntry,
+                ...zoneOptions
+            }
+        );
+
+        let zoneHasPlan = !!rotateMove || !!plan;
+        if(this.sinkLockActive && !zoneHasPlan && !terminalAware){
+            this.releaseSinkLock();
+            rotateMove = inSinkZone
+                ? this.findSinkZoneRotation(state, connected, sinkZoneContext)
+                : this.findBestRotation(
+                    state,
+                    connected,
+                    frontier,
+                    target,
+                    {
+                        sink,
+                        sinkEntry,
+                        nearSink,
+                        inSinkZone,
+                        terminalAware:false,
+                        blockSinkZoneBeforeEntry: !inSinkZone
+                    }
+                );
+            plan = this.findBestRock(
+                state,
+                connected,
+                frontier,
+                sink,
+                { goal:sinkEntry }
+            );
+            zoneHasPlan = !!rotateMove || !!plan;
+        }
+
+        const noProgress = this.noProgressSteps >= 5;
+        const shouldHint = this.shouldUseHint(state, {
+            nearSink,
+            terminalAware,
+            inSinkZone,
+            noProgress,
+            patternLoop,
+            noValidAction: !rotateMove && !(plan && plan.rock),
+            zoneFailed: this.sinkLockActive && !zoneHasPlan,
+            lackResource: !!plan && plan.rocksNeeded > maxShovel
+        });
+        const immediateHint = terminalAware && shouldHint;
+        const flowAdjustmentMove = inSinkZone
+            ? this.findSinkZoneFlowAdjustment(state, connected, sinkZoneContext)
+            : null;
+        const sinkZoneRockAction = inSinkZone
+            ? this.findSinkZoneRockAction(state, connected, sinkZoneContext)
+            : null;
+        const backwardMove = inSinkZone
+            ? this.findSinkZoneBackwardMove(state, connected, sinkZoneContext)
+            : null;
 
         if(rotateMove){
-            const moveKey = `${rotateMove.r},${rotateMove.c}`;
-
-            this.mode = sinkFocus ? "SINK_FOCUS" : "NORMAL";
-            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels} EXPAND=${rotateMove.expandScore}`);
-            this.lastMove={
-                type:"ROTATE",
-                r:rotateMove.r,
-                c:rotateMove.c
-            };
-            this.lastMoves.push(moveKey);
-            if(this.lastMoves.length>5) this.lastMoves.shift();
-
-            if(rotateMove.expand>connected.size){
-                this.stuckCount=0;
-                this.rotationMap.set(moveKey,1);
-            }else{
-                this.stuckCount++;
-                this.rotationMap.set(
-                    moveKey,
-                    (this.rotationMap.get(moveKey)||0)+1
-                );
-            }
-
-            this.logger(`ROTATE (${rotateMove.r},${rotateMove.c}) -> ${rotateMove.rot}`);
-            this.actions.rotate(
-                rotateMove.r,
-                rotateMove.c,
-                rotateMove.rot
-            );
+            this.mode = recoveringHint ? "COLLECT_AFTER_HINT" : terminalAware ? "TERMINAL" : this.sinkLockActive ? "SINK_LOCK" : "NORMAL";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels} SCORE=${rotateMove.score}`);
+            this.executeRotate(rotateMove, connected.size);
             return;
         }
 
-        const noExpandMove =
-            this.stuckCount>=3 || patternLoop;
-        const lackResource =
-            !!sinkPlan &&
-            sinkPlan.rocksNeeded > maxShovel;
-        const shouldHint =
-            noExpandMove &&
-            lackResource &&
-            state.coins>=400 &&
-            state.coins<1000;
-
-        if(shouldHint && !sinkFocus){
-            this.mode = "ESCAPE";
+        if(flowAdjustmentMove){
+            this.mode = "FLOW_ADJUST";
             this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-            if(this.actions.hint){
-                this.lastMove={type:"HINT"};
-                this.stuckCount=0;
-                this.logger(state.coins>=700 ? "USE_HINT_STRONG" : "USE_HINT");
-                this.actions.hint();
-                return;
-            }
-            this.logger("HINT_UNAVAILABLE");
+            this.executeRotate(flowAdjustmentMove, connected.size);
+            return;
         }
 
-        if(lackResource && noExpandMove && !sinkFocus){
-            this.mode = "RESOURCE";
-            let bestCoin = null;
-
-            connected.forEach(k=>{
-                const [r,c]=k.split(",").map(Number);
-                const cell = state.grid[r][c];
-                if(cell?.hasCoin){
-                    const score = this.manhattan({r,c},sink);
-                    if(!bestCoin || score<bestCoin.score){
-                        bestCoin={r,c,score};
-                    }
-                }
-            });
-
-            if(bestCoin){
-                target = {r:bestCoin.r,c:bestCoin.c};
-                plan = { rock:null, rocksNeeded:0, score:bestCoin.score };
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-            }else{
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-                this.logger("NO REACHABLE COIN");
+        if(sinkZoneRockAction){
+            this.mode = "ZONE_BREAK";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            if(state.shovels > 0){
+                this.executeDestroy(sinkZoneRockAction.rock);
                 return;
             }
-        }else{
-            this.mode = sinkFocus ? "SINK_FOCUS" : "ESCAPE";
-            plan = sinkPlan;
+            if(state.coins >= state.shovelCost){
+                this.executeBuy();
+                return;
+            }
+        }
+
+        if(backwardMove){
+            this.mode = "BACKWARD_LINK";
             this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeRotate(backwardMove, connected.size);
+            return;
         }
 
         if(plan && plan.rock){
-            const rock = plan.rock;
+            this.mode = terminalAware ? "TERMINAL" : this.sinkLockActive ? "SINK_LOCK" : "ESCAPE";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels} ROCKS=${plan.rocksNeeded}`);
             if(state.shovels>0){
-                this.mode = sinkFocus ? "SINK_FOCUS" : "ESCAPE";
-                this.lastMove={type:"DESTROY",r:rock.r,c:rock.c};
-                this.repeatCount=0;
-                this.stuckCount=0;
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-                this.logger(`DESTROY (${rock.r},${rock.c})`);
-                this.actions.destroy(rock.r,rock.c);
+                this.executeDestroy(plan.rock);
                 return;
             }
             if(state.coins>=state.shovelCost){
-                this.mode = sinkFocus ? "SINK_FOCUS" : "ESCAPE";
-                this.lastMove={type:"BUY"};
-                this.repeatCount=0;
-                this.stuckCount=0;
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-                this.logger(`BUY_SHOVEL`);
-                this.actions.buy();
+                this.executeBuy();
                 return;
             }
-            if(!sinkFocus && state.coins>=400 && state.coins<1000 && this.actions.hint){
-                this.mode = "ESCAPE";
-                this.lastMove={type:"HINT"};
-                this.stuckCount=0;
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-                this.logger(state.coins>=700 ? "USE_HINT_STRONG" : "USE_HINT");
-                this.actions.hint();
-                return;
+        }
+
+        if(immediateHint){
+            this.mode = terminalAware ? "TERMINAL_HINT" : "ESCAPE";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeHint(state, connected, sink);
+            return;
+        }
+
+        if(inSinkZone && this.sinkZoneAttempts >= 12 && this.canUseHint(state, { inSinkZone:true })){
+            this.mode = "SINK_ZONE_HINT";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeHint(state, connected, sink);
+            return;
+        }
+
+        const fallbackMove = inSinkZone ? null : this.findFallbackRotation(
+            state,
+            connected,
+            sink,
+            {
+                recoverHint: recoveringHint,
+                hintTarget,
+                inSinkZone,
+                nearSink,
+                terminalAware,
+                blockSinkZoneBeforeEntry: !inSinkZone
             }
-            this.logger("ESCAPE BLOCKED");
+        );
+        if(fallbackMove){
+            this.mode = recoveringHint ? "COLLECT_AFTER_HINT" : "ANTI_STUCK";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeRotate(fallbackMove, connected.size);
+            return;
+        }
+
+        if(shouldHint){
+            this.mode = "ANTI_STUCK_HINT";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeHint(state, connected, sink);
+            return;
+        }
+
+        this.softResetStrategy(inSinkZone ? 4 : 3);
+        const emergencyMove = inSinkZone ? null : this.findFallbackRotation(
+            state,
+            connected,
+            sink,
+            {
+                recoverHint: recoveringHint,
+                hintTarget,
+                inSinkZone,
+                nearSink:false,
+                terminalAware:false,
+                ignoreHistory:true,
+                blockSinkZoneBeforeEntry: !inSinkZone
+            }
+        );
+        if(emergencyMove){
+            this.mode = "RECOVERY";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeRotate(emergencyMove, connected.size);
+            return;
+        }
+
+        const randomMove = inSinkZone ? null : this.findRandomValidRotation(state, sink, {
+            blockSinkZoneBeforeEntry: !inSinkZone
+        });
+        if(randomMove){
+            this.mode = "RANDOM_RECOVERY";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeRotate(randomMove, connected.size);
+            return;
+        }
+
+        const desperationRock = this.findNearestRock(frontier, sinkEntry, sink, !inSinkZone);
+        if(desperationRock && state.shovels > 0){
+            this.mode = "DEADLOCK_BREAK";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeDestroy(desperationRock);
+            return;
+        }
+        if(desperationRock && state.coins >= state.shovelCost){
+            this.mode = "DEADLOCK_BUY";
+            this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
+            this.executeBuy();
             return;
         }
 
         this.stuckCount++;
-        if(this.stuckCount>=4){
-            if(!sinkFocus && state.coins>=400 && state.coins<1000 && this.actions.hint){
-                this.mode = "ESCAPE";
-                this.lastMove={type:"HINT"};
-                this.stuckCount=0;
-                this.logger(`MODE=${this.mode} FLOW=${connected.size} COINS=${state.coins} SHOVELS=${state.shovels}`);
-                this.logger(state.coins>=700 ? "USE_HINT_STRONG" : "USE_HINT");
-                this.actions.hint();
-                return;
-            }
-            this.logger("STUCK STOP");
-            return;
-        }
-        this.logger("NO VALID MOVE");
+        this.logger(this.sinkLockActive ? "SINK_ZONE_BLOCKED" : "EMERGENCY_REEVAL");
 
     }
 
@@ -828,77 +982,87 @@ class PipeAI {
     /* ROTATION HEURISTIC        */
     /* ========================= */
 
-    findBestRotation(state,connected,frontier,target,targetLocked=false){
+    findBestRotation(state,connected,frontier,target,options={}){
 
-        let best=null;
-        let bestExpand=-1;
-        let bestScore=999999;
+        let best = null;
+        let bestScore = -999999999;
 
-        const grid=state.grid;
+        const grid = state.grid;
         const pipeFrontier = frontier.filter(p => p.type==="PIPE");
         const recent = this.lastMoves || [];
-        const hasABAB =
-            recent.length>=4 &&
-            recent[recent.length-1]===recent[recent.length-3] &&
-            recent[recent.length-2]===recent[recent.length-4] &&
-            recent[recent.length-1]!==recent[recent.length-2];
+        const hasABAB = this.isPatternLoop();
+        const currentTargetDistance = this.distanceSet(connected, target);
+        const currentSinkDistance = this.distanceSet(connected, options.sink || target);
 
         for(const p of pipeFrontier){
 
-            const cell=grid[p.r][p.c];
+            if(options.restrictToZone && !this.isInSinkZone(p, options.sink, options.zoneRadius)) continue;
+            if(options.blockSinkZoneBeforeEntry && this.isInSinkZone(p, options.sink, 7)) continue;
+
+            const cell = grid[p.r][p.c];
             const cellType = String(cell.type || "").toUpperCase();
             if(cellType==="DIRT" || cellType==="SOURCE" || cellType==="SINK") continue;
 
             const cellKey = this.key(p);
-            if((this.rotationMap?.get(cellKey) || 0) >= 3) continue;
-            if(hasABAB && recent.includes(cellKey)) continue;
+            const repeatCount = this.rotationMap?.get(cellKey) || 0;
+            if(repeatCount >= 3 && !options.terminalAware) continue;
+            if(hasABAB && recent.includes(cellKey) && !options.terminalAware) continue;
             if(
                 this.lastMove &&
                 this.lastMove.type==="ROTATE" &&
                 this.lastMove.r===p.r &&
-                this.lastMove.c===p.c
+                this.lastMove.c===p.c &&
+                !options.terminalAware
             ) continue;
 
-            const original=cell.rotation||0;
+            const original = cell.rotation || 0;
             const maxRot = cellType==="CROSS" ? 1 : 4;
 
             for(let rot=0;rot<maxRot;rot++){
                 if(rot===original) continue;
 
-                cell.rotation=rot;
+                cell.rotation = rot;
 
-                const flow=this.bfs(
-                    grid,
-                    this.find(grid,"SOURCE")
-                );
-                const newSet=flow.visited;
-
-                if(!newSet.has(this.key(p))) continue;
+                const flow = this.bfs(grid, this.find(grid,"SOURCE"));
+                const newSet = flow.visited;
                 const expandScore = newSet.size - connected.size;
-                const distanceAfter = this.distanceSet(newSet,target);
-                if(expandScore<=0 && !targetLocked) continue;
-                if(targetLocked && distanceAfter > 3) continue;
+                const targetDistanceAfter = this.distanceSet(newSet,target);
+                const sinkDistanceAfter = this.distanceSet(newSet, options.sink || target);
+                const coinGain = this.countNewCoins(grid, connected, newSet);
+                const score = this.scoreRotationCandidate({
+                    p,
+                    repeatCount,
+                    expandScore,
+                    currentTargetDistance,
+                    currentSinkDistance,
+                    targetDistanceAfter,
+                    sinkDistanceAfter,
+                    coinGain,
+                    nearSink: !!options.nearSink,
+                    inSinkZone: !!options.inSinkZone,
+                    terminalAware: !!options.terminalAware,
+                    recoveringHint: !!options.recoveringHint
+                });
 
-                const score=
-                    distanceAfter
-                    +
-                    this.manhattan(p,target);
+                if(expandScore<=0 && !options.terminalAware && !options.nearSink){
+                    cell.rotation = original;
+                    continue;
+                }
 
-                if(expandScore<bestExpand) continue;
-                if(expandScore===bestExpand && score>=bestScore) continue;
+                if(score > bestScore){
+                    bestScore = score;
+                    best = {
+                        r:p.r,
+                        c:p.c,
+                        rot,
+                        expand:newSet.size,
+                        expandScore,
+                        score
+                    };
+                }
 
-                bestExpand=expandScore;
-                bestScore=score;
-                best={
-                    r:p.r,
-                    c:p.c,
-                    rot,
-                    expand:newSet.size,
-                    expandScore
-                };
+                cell.rotation = original;
             }
-
-            cell.rotation=original;
         }
 
         return best;
@@ -909,14 +1073,13 @@ class PipeAI {
     /* ROCK HEURISTIC            */
     /* ========================= */
 
-    findBestRock(state,connected,frontier,sink){
+    findBestRock(state,connected,frontier,sink,options={}){
 
         const starts = frontier.filter(p => p.type==="PIPE" || p.type==="ROCK");
         if(!starts.length) return null;
 
         const grid = state.grid;
-        const rows = grid.length;
-        const cols = grid[0].length;
+        const goal = options.goal || sink;
         const open = [];
         const gScore = new Map();
         const fScore = new Map();
@@ -924,10 +1087,11 @@ class PipeAI {
         const closed = new Set();
 
         for(const start of starts){
+            if(options.restrictToZone && !this.isInSinkZone(start, sink, options.zoneRadius)) continue;
             const key=this.key(start);
             const cost=start.type==="ROCK" ? 1 : 0;
             gScore.set(key,cost);
-            fScore.set(key,cost+this.manhattan(start,sink));
+            fScore.set(key,cost+this.manhattan(start,goal));
             open.push({r:start.r,c:start.c});
         }
 
@@ -945,7 +1109,7 @@ class PipeAI {
             if(closed.has(currentKey)) continue;
             closed.add(currentKey);
 
-            if(current.r===sink.r && current.c===sink.c){
+            if(current.r===goal.r && current.c===goal.c){
                 const path=[];
                 let walk=currentKey;
                 while(walk){
@@ -972,7 +1136,7 @@ class PipeAI {
                     rock:firstRock,
                     rocksNeeded,
                     score:
-                        this.manhattan(path[0],sink)
+                        this.manhattan(path[0],goal)
                         +
                         rocksNeeded*100
                         +
@@ -980,7 +1144,7 @@ class PipeAI {
                             0,
                             (rocksNeeded-state.shovels)*state.shovelCost
                         ),
-                    target:sink,
+                    target:goal,
                     pathLen:path.length
                 };
             }
@@ -988,6 +1152,7 @@ class PipeAI {
             for(const next of this.neighbors(grid,current)){
                 const nextKey=this.key(next);
                 if(closed.has(nextKey) || connected.has(nextKey)) continue;
+                if(options.restrictToZone && !this.isInSinkZone(next, sink, options.zoneRadius)) continue;
 
                 const cell=grid[next.r][next.c];
                 const stepCost=
@@ -998,7 +1163,7 @@ class PipeAI {
 
                 parent.set(nextKey,currentKey);
                 gScore.set(nextKey,tentative);
-                fScore.set(nextKey,tentative + this.manhattan(next,sink));
+                fScore.set(nextKey,tentative + this.manhattan(next,goal));
                 open.push({r:next.r,c:next.c});
             }
         }
@@ -1085,6 +1250,967 @@ class PipeAI {
 
         return min;
 
+    }
+
+    updateProgress(bestDistance, flowSize){
+
+        if(bestDistance < this.lastBestDistance || flowSize > this.lastFlowSize){
+            this.noProgressSteps = 0;
+        }else{
+            this.noProgressSteps++;
+        }
+
+        this.lastBestDistance = bestDistance;
+        this.lastFlowSize = flowSize;
+
+        if(this.isPatternLoop()){
+            this.loopCount++;
+        }else{
+            this.loopCount = 0;
+        }
+
+    }
+
+    isPatternLoop(){
+        const recent = this.lastMoves || [];
+        return (
+            recent.length >= 4 &&
+            recent[recent.length-1] === recent[recent.length-3] &&
+            recent[recent.length-2] === recent[recent.length-4] &&
+            recent[recent.length-1] !== recent[recent.length-2]
+        );
+    }
+
+    activateSinkLock(radius){
+        this.sinkLockActive = true;
+        this.sinkLockRadius = radius;
+    }
+
+    releaseSinkLock(){
+        this.sinkLockActive = false;
+        this.sinkLockRadius = 3;
+    }
+
+    getSinkEntry(grid, sink){
+        const left = { r:sink.r, c:sink.c - 1 };
+        if(
+            left.r >= 0 &&
+            left.c >= 0 &&
+            left.r < grid.length &&
+            left.c < grid[0].length
+        ){
+            return left;
+        }
+        return sink;
+    }
+
+    isInSinkZone(p, sink, radius=7){
+        if(!sink) return true;
+        return this.manhattan(p, sink) <= radius;
+    }
+
+    countNewCoins(grid, oldSet, newSet){
+        let total = 0;
+        newSet.forEach(k => {
+            if(oldSet.has(k)) return;
+            const [r,c] = k.split(",").map(Number);
+            if(grid[r]?.[c]?.hasCoin) total++;
+        });
+        return total;
+    }
+
+    distanceFromSetToPoint(set, point){
+        let min = 999999;
+        set.forEach(k => {
+            const [r,c] = k.split(",").map(Number);
+            min = Math.min(min, this.manhattan({r,c}, point));
+        });
+        return min;
+    }
+
+    computeHintZone(state, connected, sink){
+        const grid = state.grid;
+        const coins = state.coins;
+        const zoneCells = [];
+        const pushCell = (r,c) => {
+            if(r<0 || c<0 || r>=grid.length || c>=grid[0].length) return;
+            zoneCells.push({r,c});
+        };
+
+        if(coins >= 1000){
+            for(let r=0;r<grid.length;r++){
+                for(let c=0;c<grid[0].length;c++) pushCell(r,c);
+            }
+        }else if(coins >= 700){
+            const startR = Math.max(0, sink.r - 6);
+            const startC = Math.max(0, sink.c - 6);
+            for(let r=startR;r<=sink.r;r++){
+                for(let c=startC;c<=sink.c;c++) pushCell(r,c);
+            }
+        }else if(coins >= 400){
+            let bestRegion = {r:0,c:0,count:-1};
+            for(let r=0;r<=grid.length-5;r++){
+                for(let c=0;c<=grid[0].length-10;c++){
+                    let count = 0;
+                    for(let ir=r;ir<r+5;ir++){
+                        for(let ic=c;ic<c+10;ic++){
+                            if(grid[ir][ic].type === "DIRT") count++;
+                        }
+                    }
+                    if(count > bestRegion.count) bestRegion = {r,c,count};
+                }
+            }
+            for(let r=bestRegion.r;r<bestRegion.r+5;r++){
+                for(let c=bestRegion.c;c<bestRegion.c+10;c++) pushCell(r,c);
+            }
+        }else{
+            const activeCells = [];
+            connected.forEach(k => {
+                const [r,c] = k.split(",").map(Number);
+                activeCells.push({r,c});
+            });
+            const dirts = [];
+            for(let r=0;r<grid.length;r++){
+                for(let c=0;c<grid[0].length;c++){
+                    if(grid[r][c].type === "DIRT"){
+                        const dist = activeCells.length
+                            ? Math.min(...activeCells.map(a => this.manhattan(a, {r,c})))
+                            : 999999;
+                        dirts.push({r,c,dist});
+                    }
+                }
+            }
+            dirts.sort((a,b)=>a.dist-b.dist);
+            const limit = coins >= 200 ? 3 : 1;
+            dirts.slice(0, limit).forEach(cell => pushCell(cell.r, cell.c));
+        }
+
+        const keySet = new Set(zoneCells.map(cell => this.key(cell)));
+        return {
+            keySet,
+            cells: zoneCells,
+            createdAt: Date.now()
+        };
+    }
+
+    getRemainingHintCoins(grid, connected){
+        if(!this.postHintZone?.keySet) return [];
+
+        const coins = [];
+        this.postHintZone.keySet.forEach(k => {
+            const [r,c] = k.split(",").map(Number);
+            const cell = grid[r]?.[c];
+            if(cell?.hasCoin){
+                coins.push({
+                    r,
+                    c,
+                    reachable: connected.has(k),
+                    distance: this.distanceFromSetToPoint(connected, {r,c})
+                });
+            }
+        });
+
+        this.postHintCoins = coins;
+        if(!coins.length){
+            this.postHintZone = null;
+        }
+
+        return coins;
+    }
+
+    pickBestHintCoinTarget(coins, connected, sinkEntry){
+        const scored = [...coins].sort((a,b) => {
+            if(a.reachable !== b.reachable) return a.reachable ? -1 : 1;
+            if(a.distance !== b.distance) return a.distance - b.distance;
+            return this.manhattan(a, sinkEntry) - this.manhattan(b, sinkEntry);
+        });
+        return scored[0] || null;
+    }
+
+    findNearestReachableCoin(grid, connected, sinkEntry){
+        let best = null;
+        connected.forEach(k => {
+            const [r,c] = k.split(",").map(Number);
+            const cell = grid[r]?.[c];
+            if(!cell?.hasCoin) return;
+            const score = this.manhattan({r,c}, sinkEntry);
+            if(!best || score < best.score){
+                best = { r, c, score };
+            }
+        });
+        return best ? { r:best.r, c:best.c } : null;
+    }
+
+    findNearestRock(frontier, sinkEntry, sink, blockSinkZoneBeforeEntry=false){
+        const rocks = frontier.filter(node => node.type === "ROCK");
+        let best = null;
+        for(const rock of rocks){
+            if(blockSinkZoneBeforeEntry && this.isInSinkZone(rock, sink, 7)) continue;
+            const score = this.manhattan(rock, sinkEntry);
+            if(!best || score < best.score){
+                best = { r:rock.r, c:rock.c, score };
+            }
+        }
+        return best ? { r:best.r, c:best.c } : null;
+    }
+
+    countZoneRocks(grid, sink, radius=7){
+        let total = 0;
+        for(let r=0;r<grid.length;r++){
+            for(let c=0;c<grid[0].length;c++){
+                if(!this.isInSinkZone({r,c}, sink, radius)) continue;
+                if(String(grid[r][c]?.type || "").toUpperCase()==="DIRT") total++;
+            }
+        }
+        return total;
+    }
+
+    getSinkRotationAttemptKey(node, rot, mode){
+        return `${mode}:${node.r},${node.c}:${rot}`;
+    }
+
+    getSinkRotationAttemptCount(node, rot, mode){
+        const key = this.getSinkRotationAttemptKey(node, rot, mode);
+        return this.sinkZoneRotationAttempts?.get(key) || 0;
+    }
+
+    recordSinkRotationAttempt(node, rot, mode){
+        const key = this.getSinkRotationAttemptKey(node, rot, mode);
+        this.sinkZoneRotationAttempts.set(
+            key,
+            (this.sinkZoneRotationAttempts.get(key) || 0) + 1
+        );
+    }
+
+    resetSinkRotationAttempts(strategy=null){
+        this.sinkZoneRotationAttempts = new Map();
+        this.lastSinkZoneStrategy = strategy;
+    }
+
+    searchSinkZoneStateSpace(state, context){
+        if(!context) return null;
+
+        if(this.lastSinkZoneStrategy !== "STATE_SEARCH"){
+            this.resetSinkRotationAttempts("STATE_SEARCH");
+        }
+
+        const initialGrid = JSON.parse(JSON.stringify(state.grid));
+        const depthLimit = 12;
+        const expandLimit = 140;
+        const open = [];
+        const visited = new Map();
+        const start = this.makeSinkSearchNode(
+            initialGrid,
+            {
+                coins: state.coins,
+                shovels: state.shovels,
+                shovelCost: state.shovelCost
+            },
+            context,
+            0,
+            null
+        );
+
+        open.push(start);
+        visited.set(start.key, 0);
+
+        let best = null;
+        let expanded = 0;
+
+        while(open.length && expanded < expandLimit){
+            open.sort((a,b)=>a.priority-b.priority || a.heuristic-b.heuristic);
+            const current = open.shift();
+            expanded++;
+
+            if(current.goal){
+                return current.firstAction;
+            }
+
+            if(!best || current.heuristic < best.heuristic){
+                best = current;
+            }
+
+            if(current.depth >= depthLimit) continue;
+
+            const actions = this.generateSinkSearchActions(current, context);
+            for(const action of actions){
+                const next = this.applySinkSearchAction(current, action, context);
+                if(!next) continue;
+                const known = visited.get(next.key);
+                if(known !== undefined && known <= next.cost) continue;
+                visited.set(next.key, next.cost);
+                open.push(next);
+            }
+        }
+
+        return best?.firstAction || null;
+    }
+
+    makeSinkSearchNode(grid, resources, context, depth, firstAction){
+        const source = this.find(grid, "SOURCE");
+        const flow = this.bfs(grid, source);
+        const connected = flow.visited;
+        const frontier = flow.frontier;
+        const distanceToEntry = this.distanceSet(connected, context.sinkEntry);
+        const distanceToSink = this.distanceSet(connected, context.sink);
+        const reachedEntry = connected.has(this.key(context.sinkEntry));
+        const reachedSink = connected.has(this.key(context.sink));
+        const blockedRocks = this.countZoneRocks(grid, context.sink, 7);
+        const flowHead = this.getClosestFlowCellToTarget(connected, context.sinkEntry);
+        const flowDirection = this.getFlowDirection(grid, flowHead, context.sinkEntry);
+        const heuristic =
+            distanceToEntry * 25 +
+            distanceToSink * 10 +
+            blockedRocks * 18 +
+            (flowDirection.aligned ? 0 : 12) +
+            depth * 6;
+
+        return {
+            grid,
+            resources,
+            connected,
+            frontier,
+            depth,
+            cost: depth,
+            heuristic,
+            priority: depth + heuristic,
+            goal: reachedSink || reachedEntry,
+            firstAction,
+            key: this.serializeSinkSearchState(grid, resources, context, flowHead, flowDirection),
+            flowHead,
+            flowDirection
+        };
+    }
+
+    serializeSinkSearchState(grid, resources, context, flowHead, flowDirection){
+        const zone = [];
+        for(const node of context.zoneCells){
+            const cell = grid[node.r]?.[node.c];
+            zone.push(`${node.r},${node.c}:${cell?.type || ""}:${cell?.rotation || 0}`);
+        }
+        return [
+            zone.join("|"),
+            resources.coins,
+            resources.shovels,
+            flowHead ? `${flowHead.r},${flowHead.c}` : "none",
+            flowDirection.index
+        ].join("#");
+    }
+
+    getClosestFlowCellToTarget(connected, target){
+        let best = null;
+        let bestDist = 999999;
+        connected.forEach(k => {
+            const [r,c] = k.split(",").map(Number);
+            const d = this.manhattan({r,c}, target);
+            if(d < bestDist){
+                bestDist = d;
+                best = {r,c};
+            }
+        });
+        return best;
+    }
+
+    getFlowDirection(grid, node, target){
+        if(!node){
+            return { index:-1, aligned:false };
+        }
+        const dirs = [
+            {dr:-1,dc:0},
+            {dr:0,dc:1},
+            {dr:1,dc:0},
+            {dr:0,dc:-1}
+        ];
+        const bestIndex = dirs.reduce((best, dir, index) => {
+            const next = { r: node.r + dir.dr, c: node.c + dir.dc };
+            const score = this.manhattan(next, target);
+            if(!best || score < best.score) return { index, score };
+            return best;
+        }, null);
+        const desired =
+            Math.abs(target.c - node.c) >= Math.abs(target.r - node.r)
+                ? (target.c >= node.c ? 1 : 3)
+                : (target.r >= node.r ? 2 : 0);
+        return {
+            index: bestIndex?.index ?? -1,
+            aligned: bestIndex?.index === desired
+        };
+    }
+
+    generateSinkSearchActions(node, context){
+        const actions = [];
+        const candidateKeys = new Set([
+            ...context.flowZoneSet,
+            ...context.flowNeighborSet
+        ]);
+
+        for(const key of candidateKeys){
+            if(!context.zoneSet.has(key)) continue;
+            const [r,c] = key.split(",").map(Number);
+            const cell = node.grid[r]?.[c];
+            const type = String(cell?.type || "").toUpperCase();
+            if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+            for(const rot of this.getCandidateRotationsForCell(cell)){
+                if(this.getSinkRotationAttemptCount({r,c}, rot, "STATE_SEARCH") >= 3) continue;
+                actions.push({ type:"ROTATE", r, c, rot });
+            }
+        }
+
+        const rockAction = this.findSinkSearchRockCandidate(node, context);
+        if(rockAction){
+            actions.push(rockAction);
+        }
+
+        return actions;
+    }
+
+    findSinkSearchRockCandidate(node, context){
+        const rockPlan = this.findBestRock(
+            {
+                grid: node.grid,
+                shovels: node.resources.shovels,
+                shovelCost: node.resources.shovelCost
+            },
+            node.connected,
+            context.frontierZone,
+            context.sink,
+            {
+                goal: context.sinkEntry,
+                restrictToZone: true,
+                zoneRadius: 7
+            }
+        );
+
+        if(!rockPlan?.rock) return null;
+        const rock = rockPlan.rock;
+        const rockKey = this.key(rock);
+        const useful =
+            context.flowNeighborSet.has(rockKey) ||
+            this.manhattan(rock, context.sinkEntry) <= 2 ||
+            context.frontierZone.some(node => this.key(node)===rockKey);
+
+        if(!useful) return null;
+        if(node.resources.shovels <= 0) return null;
+
+        return { type:"DESTROY", r:rock.r, c:rock.c };
+    }
+
+    applySinkSearchAction(current, action, context){
+        const grid = JSON.parse(JSON.stringify(current.grid));
+        const resources = { ...current.resources };
+
+        if(action.type==="ROTATE"){
+            grid[action.r][action.c].rotation = action.rot;
+        }else if(action.type==="DESTROY"){
+            if(resources.shovels <= 0) return null;
+            resources.shovels -= 1;
+            grid[action.r][action.c].type = "STRAIGHT";
+            grid[action.r][action.c].rotation = 0;
+        }else{
+            return null;
+        }
+
+        const firstAction = current.firstAction || {
+            ...action,
+            score: Math.max(1, 1000 - current.heuristic),
+            cost: current.depth + 1
+        };
+
+        return this.makeSinkSearchNode(
+            grid,
+            resources,
+            context,
+            current.depth + 1,
+            firstAction
+        );
+    }
+
+    buildSinkZoneContext(grid, connected, frontier, sink){
+        const sinkEntry = this.getSinkEntry(grid, sink);
+        const zoneCells = [];
+        const zoneSet = new Set();
+        const flowZoneCells = [];
+        const flowZoneSet = new Set();
+        const flowNeighborSet = new Set();
+        const frontierZone = [];
+
+        for(let r=0;r<grid.length;r++){
+            for(let c=0;c<grid[0].length;c++){
+                const node = {r,c};
+                if(!this.isInSinkZone(node, sink, 7)) continue;
+                zoneCells.push(node);
+                zoneSet.add(this.key(node));
+            }
+        }
+
+        connected.forEach(k => {
+            const [r,c] = k.split(",").map(Number);
+            const node = {r,c};
+            if(!this.isInSinkZone(node, sink, 7)) return;
+            flowZoneCells.push(node);
+            flowZoneSet.add(k);
+            this.neighbors(grid, node).forEach(next => {
+                if(this.isInSinkZone(next, sink, 7)){
+                    flowNeighborSet.add(this.key(next));
+                }
+            });
+        });
+
+        frontier.forEach(node => {
+            if(this.isInSinkZone(node, sink, 7)) frontierZone.push(node);
+        });
+
+        return {
+            sink,
+            sinkEntry,
+            zoneCells,
+            zoneSet,
+            flowZoneCells,
+            flowZoneSet,
+            flowNeighborSet,
+            frontierZone
+        };
+    }
+
+    getCandidateRotationsForCell(cell){
+        const type = String(cell.type || "").toUpperCase();
+        const original = cell.rotation || 0;
+        const maxRot = type==="CROSS" ? 1 : 4;
+        const rotations = [];
+        for(let rot=0;rot<maxRot;rot++){
+            if(rot===original) continue;
+            rotations.push(rot);
+        }
+        return rotations;
+    }
+
+    findSinkZoneRotation(state, connected, context){
+        if(!context) return null;
+
+        if(this.lastSinkZoneStrategy !== "FLOW_CONNECT"){
+            this.resetSinkRotationAttempts("FLOW_CONNECT");
+        }
+
+        const grid = state.grid;
+        const candidates = [];
+        const directKeys = new Set([
+            this.key(context.sinkEntry),
+            ...context.frontierZone.map(node => this.key(node)),
+            ...context.flowZoneCells.map(node => this.key(node)),
+            ...context.flowNeighborSet
+        ]);
+
+        for(const key of directKeys){
+            const [r,c] = key.split(",").map(Number);
+            if(!context.zoneSet.has(key)) continue;
+            const cell = grid[r]?.[c];
+            const type = String(cell?.type || "").toUpperCase();
+            if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+            for(const rot of this.getCandidateRotationsForCell(cell)){
+                const score = this.evaluateSinkZoneRotation(state, connected, context, {r,c}, rot, "FLOW_CONNECT");
+                if(score) candidates.push(score);
+            }
+        }
+
+        candidates.sort((a,b)=>b.score-a.score);
+        return candidates[0] || null;
+    }
+
+    findSinkZoneFlowAdjustment(state, connected, context){
+        if(!context || !context.flowZoneCells.length) return null;
+
+        if(this.lastSinkZoneStrategy !== "FLOW_ADJUST"){
+            this.resetSinkRotationAttempts("FLOW_ADJUST");
+        }
+
+        const grid = state.grid;
+        const candidates = [];
+
+        for(const node of context.flowZoneCells){
+            const cell = grid[node.r]?.[node.c];
+            const type = String(cell?.type || "").toUpperCase();
+            if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+            for(const rot of this.getCandidateRotationsForCell(cell)){
+                const score = this.evaluateSinkZoneRotation(state, connected, context, node, rot, "FLOW_ADJUST");
+                if(score) candidates.push(score);
+            }
+        }
+
+        candidates.sort((a,b)=>b.score-a.score);
+        return candidates[0] || null;
+    }
+
+    findSinkZoneBackwardMove(state, connected, context){
+        if(!context) return null;
+
+        if(this.lastSinkZoneStrategy !== "BACKWARD"){
+            this.resetSinkRotationAttempts("BACKWARD");
+        }
+
+        const grid = state.grid;
+        const backwardTargets = [context.sinkEntry, ...this.neighbors(grid, context.sinkEntry)
+            .filter(node => context.zoneSet.has(this.key(node)))];
+        const candidates = [];
+
+        for(const node of backwardTargets){
+            const key = this.key(node);
+            if(!context.zoneSet.has(key)) continue;
+            const cell = grid[node.r]?.[node.c];
+            const type = String(cell?.type || "").toUpperCase();
+            if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+            for(const rot of this.getCandidateRotationsForCell(cell)){
+                const score = this.evaluateSinkZoneRotation(state, connected, context, node, rot, "BACKWARD");
+                if(score) candidates.push(score);
+            }
+        }
+
+        candidates.sort((a,b)=>b.score-a.score);
+        return candidates[0] || null;
+    }
+
+    findSinkZoneRockAction(state, connected, context){
+        if(!context) return null;
+
+        const rockPlan = this.findBestRock(
+            state,
+            connected,
+            context.frontierZone,
+            context.sink,
+            {
+                goal: context.sinkEntry,
+                restrictToZone: true,
+                zoneRadius: 7
+            }
+        );
+
+        if(!rockPlan?.rock) return null;
+
+        const rock = rockPlan.rock;
+        const rockKey = this.key(rock);
+        const nearSink = this.manhattan(rock, context.sinkEntry) <= 2;
+        const blocksFlow = context.frontierZone.some(node => this.key(node) === rockKey);
+        const nearFlow = context.flowNeighborSet.has(rockKey);
+
+        if(!nearSink && !blocksFlow && !nearFlow){
+            return null;
+        }
+
+        return {
+            rock,
+            rocksNeeded: rockPlan.rocksNeeded,
+            score: (nearSink ? 300 : 0) + (blocksFlow ? 220 : 0) + (nearFlow ? 180 : 0)
+        };
+    }
+
+    evaluateSinkZoneRotation(state, connected, context, node, rot, mode){
+        const grid = state.grid;
+        const cell = grid[node.r]?.[node.c];
+        if(!cell) return null;
+        if(this.getSinkRotationAttemptCount(node, rot, mode) >= 3){
+            return null;
+        }
+
+        const original = cell.rotation || 0;
+        cell.rotation = rot;
+
+        const flow = this.bfs(grid, this.find(grid, "SOURCE"));
+        const newSet = flow.visited;
+        const expandScore = newSet.size - connected.size;
+        const distanceToEntryAfter = this.distanceSet(newSet, context.sinkEntry);
+        const distanceToSinkAfter = this.distanceSet(newSet, context.sink);
+        const reachedEntry = newSet.has(this.key(context.sinkEntry));
+        const reachedSink = newSet.has(this.key(context.sink));
+        const nodeOnFlow = newSet.has(this.key(node));
+
+        cell.rotation = original;
+
+        if(reachedSink){
+            return {
+                r:node.r,
+                c:node.c,
+                rot,
+                expand:newSet.size,
+                expandScore,
+                score:999999,
+                zoneMode:mode
+            };
+        }
+
+        if(!nodeOnFlow && mode!=="BACKWARD") return null;
+
+        let score =
+            (20 - distanceToEntryAfter) * 140 +
+            (20 - distanceToSinkAfter) * 80 +
+            expandScore * 75;
+
+        if(reachedEntry) score += 800;
+        if(mode==="FLOW_ADJUST") score += 120;
+        if(mode==="BACKWARD") score += 180;
+        if(this.manhattan(node, context.sinkEntry) <= 1) score += 90;
+
+        if(score <= 0) return null;
+
+        return {
+            r:node.r,
+            c:node.c,
+            rot,
+            expand:newSet.size,
+            expandScore,
+            score,
+            zoneMode:mode
+        };
+    }
+
+    scoreRotationCandidate(params){
+        const {
+            p,
+            repeatCount,
+            expandScore,
+            currentTargetDistance,
+            currentSinkDistance,
+            targetDistanceAfter,
+            sinkDistanceAfter,
+            coinGain,
+            nearSink,
+            inSinkZone,
+            terminalAware,
+            recoveringHint
+        } = params;
+
+        const distanceWeight = terminalAware ? 260 : inSinkZone ? 150 : nearSink ? 120 : 32;
+        const sinkWeight = terminalAware ? 320 : inSinkZone ? 240 : nearSink ? 180 : 40;
+        const coinWeight = recoveringHint ? 140 : terminalAware ? 0 : inSinkZone ? 0 : nearSink ? 4 : 24;
+        const expandWeight = recoveringHint ? 85 : terminalAware ? 90 : nearSink ? 70 : 60;
+        const backtrackPenalty =
+            sinkDistanceAfter > currentSinkDistance
+                ? (terminalAware ? 450 : inSinkZone ? 280 : nearSink ? 220 : 60)
+                : 0;
+        const repeatPenalty = repeatCount * (terminalAware ? 140 : 70);
+        const localPenalty =
+            this.lastMove &&
+            this.lastMove.r===p.r &&
+            this.lastMove.c===p.c
+                ? 15
+                : 0;
+
+        return (
+            (currentTargetDistance - targetDistanceAfter) * distanceWeight +
+            (currentSinkDistance - sinkDistanceAfter) * sinkWeight +
+            expandScore * expandWeight +
+            coinGain * coinWeight -
+            backtrackPenalty -
+            repeatPenalty -
+            localPenalty
+        );
+    }
+
+    findForcedCompletion(state, source, sink, radius=2){
+        const grid = state.grid;
+        const sinkEntry = this.getSinkEntry(grid, sink);
+        const candidates = [];
+
+        for(let r=0;r<grid.length;r++){
+            for(let c=0;c<grid[0].length;c++){
+                const cell = grid[r][c];
+                const type = String(cell.type || "").toUpperCase();
+                if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+                if(this.manhattan({r,c},sink) > radius) continue;
+                candidates.push({
+                    r,
+                    c,
+                    priority:this.manhattan({r,c},sinkEntry)
+                });
+            }
+        }
+
+        candidates.sort((a,b)=>a.priority-b.priority);
+
+        for(const candidate of candidates){
+            const cell = grid[candidate.r][candidate.c];
+            const cellType = String(cell.type || "").toUpperCase();
+            const original = cell.rotation || 0;
+            const maxRot = cellType==="CROSS" ? 1 : 4;
+
+            for(let rot=0;rot<maxRot;rot++){
+                if(rot===original) continue;
+                cell.rotation = rot;
+
+                const flow = this.bfs(grid, source);
+                if(flow.visited.has(this.key(sink))){
+                    cell.rotation = original;
+                    return { r:candidate.r, c:candidate.c, rot, score:999999, expand:999999 };
+                }
+            }
+
+            cell.rotation = original;
+        }
+
+        return null;
+    }
+
+    shouldUseHint(state, context){
+        if(!this.canUseHint(state, context)) return false;
+
+        if(context.terminalAware && context.zoneFailed) return true;
+        if(context.nearSink && context.noProgress) return true;
+        if(context.patternLoop) return true;
+        if(context.noProgress) return true;
+        if(context.noValidAction) return true;
+        if(context.lackResource) return true;
+
+        return false;
+    }
+
+    findFallbackRotation(state, connected, sink, options={}){
+        const grid = state.grid;
+        const candidates = [];
+
+        for(let r=0;r<grid.length;r++){
+            for(let c=0;c<grid[0].length;c++){
+                const cell = grid[r][c];
+                const type = String(cell.type || "").toUpperCase();
+                if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+                if(this.sinkLockActive && !this.isInSinkZone({r,c}, sink, this.sinkLockRadius)) continue;
+                if(options.blockSinkZoneBeforeEntry && this.isInSinkZone({r,c}, sink, 7)) continue;
+                if(options.recoverHint && this.postHintZone?.keySet?.size){
+                    const closeToHint = this.postHintZone.keySet.has(this.key({r,c})) ||
+                        (options.hintTarget && this.manhattan({r,c}, options.hintTarget) <= 2);
+                    if(!closeToHint && options.inSinkZone) continue;
+                }
+
+                const original = cell.rotation || 0;
+                const cellKey = this.key({r,c});
+                const maxRot = type==="CROSS" ? 1 : 4;
+                for(let rot=0;rot<maxRot;rot++){
+                    if(rot===original) continue;
+                    const repeatPenalty = options.ignoreHistory ? 0 : (this.rotationMap.get(cellKey) || 0) * 25;
+                    const sinkPenalty = options.inSinkZone
+                        ? this.manhattan({r,c}, this.getSinkEntry(grid, sink)) * 12
+                        : this.manhattan({r,c}, sink) * 4;
+                    const hintBonus = options.recoverHint && options.hintTarget
+                        ? Math.max(0, 80 - this.manhattan({r,c}, options.hintTarget) * 18)
+                        : 0;
+                    const randomness = Math.random() * 10;
+                    candidates.push({
+                        r,
+                        c,
+                        rot,
+                        expand: connected.size,
+                        score: hintBonus - repeatPenalty - sinkPenalty + randomness
+                    });
+                }
+            }
+        }
+
+        candidates.sort((a,b)=>b.score-a.score);
+        return candidates[0] || null;
+    }
+
+    findRandomValidRotation(state, sink, options={}){
+        const grid = state.grid;
+        const candidates = [];
+
+        for(let r=0;r<grid.length;r++){
+            for(let c=0;c<grid[0].length;c++){
+                const cell = grid[r][c];
+                const type = String(cell.type || "").toUpperCase();
+                if(type==="DIRT" || type==="SOURCE" || type==="SINK") continue;
+                if(this.sinkLockActive && !this.isInSinkZone({r,c}, sink, this.sinkLockRadius)) continue;
+                if(options.blockSinkZoneBeforeEntry && this.isInSinkZone({r,c}, sink, 7)) continue;
+                const original = cell.rotation || 0;
+                const maxRot = type==="CROSS" ? 1 : 4;
+                for(let rot=0;rot<maxRot;rot++){
+                    if(rot===original) continue;
+                    candidates.push({
+                        r,
+                        c,
+                        rot,
+                        expand: this.lastFlowSize,
+                        score: Math.random() * 100
+                    });
+                }
+            }
+        }
+
+        if(!candidates.length) return null;
+        candidates.sort((a,b)=>b.score-a.score);
+        return candidates[0];
+    }
+
+    softResetStrategy(sinkLockRadius=3){
+        this.rotationMap = new Map();
+        this.lastMoves = [];
+        this.noProgressSteps = 0;
+        this.loopCount = 0;
+        this.resetSinkRotationAttempts(this.lastSinkZoneStrategy);
+        if(this.sinkLockActive){
+            this.sinkLockRadius = sinkLockRadius;
+        }
+    }
+
+    canUseHint(state, context={}){
+        if(!this.actions.hint) return false;
+        if((this.aiTick - this.lastHintTick) < this.hintCooldownTicks) return false;
+        const requiredCoins = context.inSinkZone ? 700 : 50;
+        return state.coins >= requiredCoins;
+    }
+
+    executeRotate(move, connectedSize){
+        const moveKey = `${move.r},${move.c}`;
+        this.lastMove = { type:"ROTATE", r:move.r, c:move.c };
+        this.lastMoves.push(moveKey);
+        if(this.lastMoves.length>6) this.lastMoves.shift();
+        if(move.zoneMode){
+            this.sinkZoneAttempts++;
+            this.recordSinkRotationAttempt({r:move.r, c:move.c}, move.rot, move.zoneMode);
+            this.lastSinkZoneStrategy = move.zoneMode;
+        }else{
+            this.sinkZoneAttempts = 0;
+        }
+
+        if(move.expand>connectedSize){
+            this.stuckCount = 0;
+        }else{
+            this.stuckCount++;
+        }
+
+        this.rotationMap.set(moveKey, (this.rotationMap.get(moveKey)||0)+1);
+
+        this.logger(`ROTATE (${move.r},${move.c}) -> ${move.rot}`);
+        this.actions.rotate(move.r, move.c, move.rot);
+    }
+
+    executeDestroy(rock){
+        this.lastMove = { type:"DESTROY", r:rock.r, c:rock.c };
+        this.repeatCount = 0;
+        this.stuckCount = 0;
+        this.noProgressSteps = 0;
+        this.sinkZoneAttempts = 0;
+        this.resetSinkRotationAttempts();
+        this.logger(`DESTROY (${rock.r},${rock.c})`);
+        this.actions.destroy(rock.r,rock.c);
+    }
+
+    executeBuy(){
+        this.lastMove = { type:"BUY" };
+        this.repeatCount = 0;
+        this.stuckCount = 0;
+        this.sinkZoneAttempts = 0;
+        this.resetSinkRotationAttempts();
+        this.logger("BUY_SHOVEL");
+        this.actions.buy();
+    }
+
+    executeHint(state, connected, sink){
+        this.lastMove = { type:"HINT" };
+        this.stuckCount = 0;
+        this.noProgressSteps = 0;
+        this.sinkZoneAttempts = 0;
+        this.resetSinkRotationAttempts();
+        this.postHintZone = this.computeHintZone(state, connected, sink);
+        this.lastHintTick = this.aiTick;
+        this.logger(state.coins>=700 ? "USE_HINT_STRONG" : "USE_HINT");
+        this.actions.hint();
     }
 
 }
